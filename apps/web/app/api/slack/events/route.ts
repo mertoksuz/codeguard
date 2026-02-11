@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             repositoryFullName: repo,
             prNumber: parseInt(prNumber, 10),
-            slackChannel: event.channel,
-            slackThreadTs: event.ts,
+            slackChannel: String(event.channel),
+            slackThreadTs: String(event.ts),
           }),
         })
           .then((res) => console.log(`[Slack Event] API responded: ${res.status}`))

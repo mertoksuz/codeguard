@@ -94,9 +94,12 @@ async function sendSlackResult(
     blocks.push({ type: "section", text: { type: "mrkdwn", text: "✅ *No issues found!* This PR looks clean." } });
   }
 
+  // Slack thread_ts must be a string like "1707667890.123456"
+  const validThreadTs = threadTs && /^\d+\.\d+$/.test(String(threadTs)) ? String(threadTs) : undefined;
+
   await slack.chat.postMessage({
     channel,
-    thread_ts: threadTs,
+    thread_ts: validThreadTs,
     blocks,
     text: `Analysis complete for PR #${result.prNumber}: ${result.score}/100`,
   });
