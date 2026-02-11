@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
+
+export const maxDuration = 60; // seconds — allows waitUntil to keep running
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "";
 
@@ -12,16 +15,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ challenge: body.challenge });
   }
 
-  // Handle events — respond to Slack IMMEDIATELY, then process
+  // Handle events — respond to Slack IMMEDIATELY, process in background
   if (body.type === "event_callback") {
     const event = body.event;
 
     console.log("[Slack Event] Event detail:", JSON.stringify({ type: event.type, subtype: event.subtype, bot_id: event.bot_id, text: event.text?.substring(0, 200) }));
 
     // Only process original messages — ignore message_changed, message_deleted, etc.
-    // This prevents duplicate analysis when Slack unfurls a GitHub link.
     if (event.type === "message" && !event.bot_id && !event.subtype) {
-      // Slack wraps URLs in <>, so match both formats
       const messageText = event.text || "";
       const prRegex = /github\.com\/([^/|>]+\/[^/|>]+)\/pull\/(\d+)/;
       const match = messageText.match(prRegex);
@@ -35,22 +36,21 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true });
         }
 
-        console.log(`[Slack Event] Calling API: ${API_URL}/api/reviews/analyze`);
-
-        // Fire-and-forget: don't await so we respond to Slack within 3s
-        fetch(`${API_URL}/api/reviews/analyze`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repositoryFullName: repo,
-            prNumber: parseInt(prNumber, 10),
-            slackChannel: String(event.channel),
-            slackThreadTs: String(event.ts),
-          }),
-          signal: AbortSignal.timeout(55000), // 55s timeout (Render cold start can take 30-60s)
-        })
-          .then((res) => console.log(`[Slack Event] API responded: ${res.status}`))
-          .catch((err) => console.error(`[Slack Event] Failed to call API (${API_URL}):`, err.message));
+        // Use waitUntil to keep function alive after responding to Slack
+        waitUntil(
+          fetch(`${API_URL}/api/reviews/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repositoryFullName: repo,
+              prNumber: parseInt(prNumber, 10),
+              slackChannel: String(event.channel),
+              slackThreadTs: String(event.ts),
+            }),
+          })
+            .then((res) => console.log(`[Slack Event] API responded: ${res.status}`))
+            .catch((err) => console.error(`[Slack Event] Failed to call API:`, err.message))
+        );
       } else {
         console.log("[Slack Event] Message received but no PR link found in:", event.text?.substring(0, 100));
       }
