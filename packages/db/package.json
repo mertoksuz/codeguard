@@ -11,6 +11,9 @@
     "db:seed": "tsx src/seed.ts",
     "db:studio": "prisma studio"
   },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
   "dependencies": {
     "@prisma/client": "^5.10.0"
   },
