@@ -18,17 +18,11 @@ export async function POST(req: NextRequest) {
 
     console.log("[Slack Event] Event detail:", JSON.stringify({ type: event.type, subtype: event.subtype, bot_id: event.bot_id, text: event.text?.substring(0, 200) }));
 
-    // Accept regular messages and message_changed (link unfurl)
-    if (event.type === "message" && !event.bot_id) {
-      // Skip subtypes that aren't relevant (but allow message_changed for unfurls)
-      if (event.subtype && event.subtype !== "message_changed") {
-        return NextResponse.json({ ok: true });
-      }
-
-      // Get text from the message or from the edited message
-      const messageText = event.text || event.message?.text || "";
-
+    // Only process original messages — ignore message_changed, message_deleted, etc.
+    // This prevents duplicate analysis when Slack unfurls a GitHub link.
+    if (event.type === "message" && !event.bot_id && !event.subtype) {
       // Slack wraps URLs in <>, so match both formats
+      const messageText = event.text || "";
       const prRegex = /github\.com\/([^/|>]+\/[^/|>]+)\/pull\/(\d+)/;
       const match = messageText.match(prRegex);
 
