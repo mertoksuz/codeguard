@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true });
         }
 
+        console.log(`[Slack Event] Calling API: ${API_URL}/api/reviews/analyze`);
+
         // Fire-and-forget: don't await so we respond to Slack within 3s
         fetch(`${API_URL}/api/reviews/analyze`, {
           method: "POST",
@@ -45,9 +47,10 @@ export async function POST(req: NextRequest) {
             slackChannel: String(event.channel),
             slackThreadTs: String(event.ts),
           }),
+          signal: AbortSignal.timeout(55000), // 55s timeout (Render cold start can take 30-60s)
         })
           .then((res) => console.log(`[Slack Event] API responded: ${res.status}`))
-          .catch((err) => console.error("[Slack Event] Failed to call API:", err.message));
+          .catch((err) => console.error(`[Slack Event] Failed to call API (${API_URL}):`, err.message));
       } else {
         console.log("[Slack Event] Message received but no PR link found in:", event.text?.substring(0, 100));
       }
