@@ -64,78 +64,87 @@ async function sendSlackResult(
   threadTs: string | undefined,
   result: { prTitle: string; prUrl: string; prNumber: number; score: number; issues: any[] }
 ) {
-  const scoreEmoji = result.score >= 80 ? "🟢" : result.score >= 60 ? "🟡" : "🔴";
-  const scoreBar = buildScoreBar(result.score);
-
   const violations = result.issues.filter((i: any) => i.severity === "error");
   const warnings = result.issues.filter((i: any) => i.severity === "warning");
-  const infos = result.issues.filter((i: any) => i.severity === "info");
+  const scoreColor = result.score >= 80 ? "#6366f1" : result.score >= 60 ? "#f59e0b" : "#ef4444";
 
   // Slack thread_ts must be a string like "1707667890.123456"
   const validThreadTs = threadTs && /^\d+\.\d+$/.test(String(threadTs)) ? String(threadTs) : undefined;
 
-  const blocks: any[] = [
-    // ── Header ──
-    {
-      type: "header",
-      text: { type: "plain_text", text: "🔍 CodeGuard Analysis Complete", emoji: true },
-    },
-    // ── PR Link ──
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: `*<${result.prUrl}|${result.prTitle}>*  ·  \`PR #${result.prNumber}\`` },
-    },
-    { type: "divider" },
-    // ── Score + Stats ──
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: `*Quality Score*\n${scoreEmoji} *${result.score}*/100\n${scoreBar}` },
-        { type: "mrkdwn", text: `*Summary*\n🔴  *${violations.length}* Violation${violations.length !== 1 ? "s" : ""}\n🟡  *${warnings.length}* Warning${warnings.length !== 1 ? "s" : ""}\n🔵  *${infos.length}* Info` },
-      ],
-    },
-  ];
+  // ── Build issue lines ──
+  const issueLines = result.issues.slice(0, 6).map((i: any) => {
+    const color = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟠" : "🔵";
+    return `${color}  *${i.ruleName}* — ${i.message}`;
+  }).join("\n\n");
 
-  // ── Issues Detail ──
+  const moreText = result.issues.length > 6
+    ? `\n\n_...and ${result.issues.length - 6} more_`
+    : "";
+
+  // ── Main attachment (for the colored side bar) ──
+  const attachment: any = {
+    color: scoreColor,
+    blocks: [
+      // Title
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `🔍  *Analysis Complete — <${result.prUrl}|PR #${result.prNumber}>*`,
+        },
+      },
+      // Stats row
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `:red_circle:  *${violations.length}*\nViolations` },
+          { type: "mrkdwn", text: `:large_orange_circle:  *${warnings.length}*\nWarnings` },
+          { type: "mrkdwn", text: `${result.score >= 80 ? ":large_purple_circle:" : result.score >= 60 ? ":large_orange_circle:" : ":red_circle:"}  *${result.score}*\nScore` },
+        ],
+      },
+      { type: "divider" },
+    ],
+  };
+
+  // Issues or clean message
   if (result.issues.length > 0) {
-    blocks.push({ type: "divider" });
-    blocks.push({
+    attachment.blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: "*Issues Found:*" },
+      text: { type: "mrkdwn", text: issueLines + moreText },
     });
-
-    const issueLines = result.issues.slice(0, 8).map((i: any) => {
-      const icon = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟡" : "🔵";
-      const file = i.file ? `  \`${i.file}${i.line ? `:${i.line}` : ""}\`` : "";
-      return `${icon}  *${i.ruleName}*${file}\n      ${i.message}`;
-    });
-
-    // Split into chunks of 4 to stay within Slack's text limits
-    for (let i = 0; i < issueLines.length; i += 4) {
-      const chunk = issueLines.slice(i, i + 4).join("\n\n");
-      blocks.push({ type: "section", text: { type: "mrkdwn", text: chunk } });
-    }
-
-    if (result.issues.length > 8) {
-      blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `_...and *${result.issues.length - 8}* more issues. View full report for details._` }],
-      });
-    }
   } else {
-    blocks.push({ type: "divider" });
-    blocks.push({
+    attachment.blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: "✅  *No issues found!* This PR looks clean and follows all configured rules." },
+      text: { type: "mrkdwn", text: "✅  *No issues found!* This PR looks clean." },
     });
   }
 
-  // ── Footer ──
-  blocks.push({ type: "divider" });
-  blocks.push({
+  // Action buttons
+  attachment.blocks.push({ type: "divider" });
+  attachment.blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: "🔧 Auto-Fix & Create PR", emoji: true },
+        style: "primary",
+        action_id: "auto_fix",
+        value: `${result.prUrl}`,
+      },
+      {
+        type: "button",
+        text: { type: "plain_text", text: "📋 View Full Report", emoji: true },
+        action_id: "view_report",
+        value: `${result.prUrl}`,
+      },
+    ],
+  });
+
+  // Footer
+  attachment.blocks.push({
     type: "context",
     elements: [
-      { type: "mrkdwn", text: `⚡ Powered by *CodeGuard AI*  ·  Analyzed ${result.issues.length} issue${result.issues.length !== 1 ? "s" : ""} across SOLID principles, complexity & clean code rules` },
+      { type: "mrkdwn", text: `⚡ *CodeGuard AI*  ·  _${result.prTitle}_` },
     ],
   });
 
@@ -144,15 +153,9 @@ async function sendSlackResult(
     thread_ts: validThreadTs,
     reply_broadcast: false,
     unfurl_links: false,
-    blocks,
-    text: `CodeGuard Analysis: PR #${result.prNumber} scored ${result.score}/100 with ${result.issues.length} issue(s)`,
+    attachments: [attachment],
+    text: `CodeGuard Analysis: PR #${result.prNumber} scored ${result.score}/100`,
   });
-}
-
-function buildScoreBar(score: number): string {
-  const filled = Math.round(score / 10);
-  const empty = 10 - filled;
-  return "▓".repeat(filled) + "░".repeat(empty);
 }
 
 // ─── Analysis Worker ───────────────────────────────
