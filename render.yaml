@@ -4,7 +4,7 @@ services:
     runtime: node
     region: frankfurt
     plan: free
-    buildCommand: "corepack enable && pnpm install && cd packages/db && pnpm exec prisma generate && cd ../.. && pnpm run --filter @codeguard/api build"
+    buildCommand: "npm install -g pnpm@8.15.0 && pnpm install && cd packages/db && pnpm exec prisma generate && cd ../.. && pnpm run --filter @codeguard/api build"
     startCommand: "cd apps/api && node dist/index.js"
     envVars:
       - key: NODE_ENV
