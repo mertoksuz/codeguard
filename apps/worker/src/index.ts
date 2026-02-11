@@ -12,7 +12,7 @@ const connection = new IORedis(redisUrl, {
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const octokit = new Octokit({ auth: process.env.GITHUB_CLIENT_SECRET });
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN || process.env.GITHUB_CLIENT_SECRET });
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 const RULES = ["SRP", "OCP", "LSP", "ISP", "DIP", "NAMING", "COMPLEXITY", "FILE_LENGTH", "IMPORTS"];
