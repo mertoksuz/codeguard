@@ -4,7 +4,11 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import { WebClient } from "@slack/web-api";
 
-const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379", { maxRetriesPerRequest: null });
+const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const connection = new IORedis(redisUrl, {
+  maxRetriesPerRequest: null,
+  tls: redisUrl.startsWith("rediss://") ? { rejectUnauthorized: false } : undefined,
+});
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const octokit = new Octokit({ auth: process.env.GITHUB_CLIENT_SECRET });
