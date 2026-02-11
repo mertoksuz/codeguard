@@ -4,7 +4,21 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": [
+        "NEXTAUTH_SECRET",
+        "NEXTAUTH_URL",
+        "DATABASE_URL",
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "REDIS_URL",
+        "GITHUB_OAUTH_CLIENT_ID",
+        "GITHUB_OAUTH_CLIENT_SECRET",
+        "API_SECRET",
+        "AI_PROVIDER",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY"
+      ]
     },
     "dev": {
       "cache": false,
