@@ -12,5 +12,4 @@ services:
         value: production
       - key: API_PORT
         value: "4000"
-    envVarGroups:
-      - name: CodeGuard
+      - fromGroup: CodeGuard
