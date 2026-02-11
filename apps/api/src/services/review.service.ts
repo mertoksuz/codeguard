@@ -23,7 +23,13 @@ export async function queuePRAnalysis(data: {
   });
 }
 
-export async function queueFixGeneration(data: { reviewId?: string; issueIds?: string[] }) {
+export async function queueFixGeneration(data: {
+  repositoryFullName: string;
+  prNumber: number;
+  slackChannel?: string;
+  slackThreadTs?: string;
+  requestedBy?: string;
+}) {
   await fixQueue.add("generate-fix", data, {
     attempts: 2,
     backoff: { type: "exponential", delay: 3000 },

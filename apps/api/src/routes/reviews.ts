@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { queuePRAnalysis } from "../services/review.service";
+import { queuePRAnalysis, queueFixGeneration } from "../services/review.service";
 
 export const reviewsRouter: Router = Router();
 
@@ -31,6 +31,30 @@ reviewsRouter.post("/analyze", async (req, res) => {
   } catch (err) {
     console.error("Failed to queue analysis:", err);
     res.status(500).json({ success: false, error: "Failed to queue analysis" });
+  }
+});
+
+reviewsRouter.post("/auto-fix", async (req, res) => {
+  try {
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, requestedBy } = req.body;
+
+    if (!repositoryFullName || !prNumber) {
+      res.status(400).json({ success: false, error: "repositoryFullName and prNumber are required" });
+      return;
+    }
+
+    await queueFixGeneration({
+      repositoryFullName,
+      prNumber: Number(prNumber),
+      slackChannel,
+      slackThreadTs,
+      requestedBy,
+    });
+
+    res.json({ success: true, data: { message: `Auto-fix queued for ${repositoryFullName}#${prNumber}` } });
+  } catch (err) {
+    console.error("Failed to queue auto-fix:", err);
+    res.status(500).json({ success: false, error: "Failed to queue auto-fix" });
   }
 });
 

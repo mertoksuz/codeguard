@@ -157,7 +157,7 @@ async function sendSlackResult(
         type: "button",
         text: { type: "plain_text", text: "📋 View Full Report", emoji: true },
         action_id: "view_report",
-        value: `${result.prUrl}`,
+        url: `${result.prUrl}`,
       },
     ],
   });
@@ -215,12 +215,283 @@ const analysisWorker = new Worker(
   { connection, concurrency: 3 }
 );
 
-// ─── Fix Worker (placeholder) ──────────────────────
+// ─── Generate fix with AI ──────────────────────────
+const FIX_SYSTEM_PROMPT = `You are an expert code fixer. You will be given a file's content and a list of code quality issues found by a reviewer.
+Return ONLY a JSON object: { "fixedContent": "<the entire fixed file content>" }
+Apply all the suggested fixes. Keep the file's original purpose and logic intact. Only fix the issues listed. Do not add comments about what you fixed.`;
+
+async function generateFixWithAI(fileContent: string, issues: any[]): Promise<string> {
+  const issueList = issues.map((i: any) =>
+    `- Line ${i.line}: [${i.severity}] ${i.ruleName}: ${i.message} (Suggestion: ${i.suggestion})`
+  ).join("\n");
+
+  const userPrompt = `File content:\n${"```"}\n${fileContent}\n${"```"}\n\nIssues to fix:\n${issueList}`;
+
+  let content = "";
+
+  if (AI_PROVIDER === "claude" && anthropic) {
+    const response = await anthropic.messages.create({
+      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+      max_tokens: 8000,
+      system: FIX_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userPrompt }],
+    });
+    const block = response.content[0];
+    content = block.type === "text" ? block.text : "";
+  } else {
+    const oa = openai || new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await oa.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o",
+      messages: [
+        { role: "system", content: FIX_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      max_tokens: 8000,
+      response_format: { type: "json_object" },
+    });
+    content = response.choices[0]?.message?.content || "";
+  }
+
+  try {
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return parsed.fixedContent || fileContent;
+  } catch {
+    return content || fileContent;
+  }
+}
+
+// ─── Get list of files changed in a PR ─────────────
+async function getPRFiles(owner: string, repo: string, prNumber: number) {
+  const { data: files } = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber });
+  return files.filter(f => f.status !== "removed");
+}
+
+// ─── Get file content from the PR's head branch ────
+async function getFileContent(owner: string, repo: string, ref: string, path: string): Promise<string> {
+  try {
+    const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
+    if ("content" in data && data.encoding === "base64") {
+      return Buffer.from(data.content, "base64").toString("utf-8");
+    }
+  } catch (e: any) {
+    console.log(`  ⚠️  Could not fetch ${path}: ${e.message}`);
+  }
+  return "";
+}
+
+// ─── Create a fix branch, commit fixed files, open PR ──
+async function createFixPR(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  baseBranch: string,
+  fixes: { path: string; content: string }[]
+): Promise<{ prUrl: string; prNumber: number }> {
+  const fixBranch = `codeguard/auto-fix-pr-${prNumber}`;
+
+  const { data: refData } = await octokit.git.getRef({ owner, repo, ref: `heads/${baseBranch}` });
+  const baseSha = refData.object.sha;
+
+  try {
+    await octokit.git.createRef({ owner, repo, ref: `refs/heads/${fixBranch}`, sha: baseSha });
+  } catch (e: any) {
+    if (e.status === 422) {
+      await octokit.git.updateRef({ owner, repo, ref: `heads/${fixBranch}`, sha: baseSha, force: true });
+    } else {
+      throw e;
+    }
+  }
+
+  for (const fix of fixes) {
+    let fileSha: string | undefined;
+    try {
+      const { data: existing } = await octokit.repos.getContent({ owner, repo, path: fix.path, ref: fixBranch });
+      if ("sha" in existing) fileSha = existing.sha;
+    } catch { /* file may not exist */ }
+
+    await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path: fix.path,
+      message: `fix: auto-fix code quality issues in ${fix.path}`,
+      content: Buffer.from(fix.content).toString("base64"),
+      branch: fixBranch,
+      ...(fileSha ? { sha: fileSha } : {}),
+    });
+  }
+
+  const fileList = fixes.map(f => "- `" + f.path + "`").join("\n");
+  const { data: newPR } = await octokit.pulls.create({
+    owner,
+    repo,
+    title: `🔧 CodeGuard Auto-Fix for PR #${prNumber}`,
+    body: `This PR was automatically generated by **CodeGuard AI** to fix code quality issues found in PR #${prNumber}.\n\n### Fixed files:\n${fileList}\n\n---\n_Powered by CodeGuard AI_`,
+    head: fixBranch,
+    base: baseBranch,
+  });
+
+  return { prUrl: newPR.html_url, prNumber: newPR.number };
+}
+
+// ─── Send fix result to Slack ──────────────────────
+async function sendFixSlackNotification(
+  channel: string,
+  threadTs: string | undefined,
+  result: { originalPrNumber: number; fixPrUrl: string; fixPrNumber: number; filesFixed: number }
+) {
+  const validThreadTs = threadTs && /^\d+\.\d+$/.test(String(threadTs)) ? String(threadTs) : undefined;
+
+  const attachment: any = {
+    color: "#22c55e",
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `🔧  *Auto-Fix Complete — <${result.fixPrUrl}|PR #${result.fixPrNumber}>*`,
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `:white_check_mark:  *${result.filesFixed}*\nFiles Fixed` },
+          { type: "mrkdwn", text: `:link:  *PR #${result.originalPrNumber}*\nOriginal PR` },
+        ],
+      },
+      { type: "divider" },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "A new pull request with AI-generated fixes has been created. Review and merge it to apply the fixes.",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "📋 View Fix PR", emoji: true },
+            style: "primary",
+            url: result.fixPrUrl,
+            action_id: "view_fix_pr",
+          },
+        ],
+      },
+      {
+        type: "context",
+        elements: [
+          { type: "mrkdwn", text: `⚡ *CodeGuard AI*  ·  _Auto-fix for PR #${result.originalPrNumber}_` },
+        ],
+      },
+    ],
+  };
+
+  await slack.chat.postMessage({
+    channel,
+    thread_ts: validThreadTs,
+    reply_broadcast: false,
+    unfurl_links: false,
+    attachments: [attachment],
+    text: `CodeGuard Auto-Fix: Created PR #${result.fixPrNumber} with ${result.filesFixed} fixed files`,
+  });
+}
+
+// ─── Fix Worker ────────────────────────────────────
 const fixWorker = new Worker(
   "fix",
   async (job) => {
-    console.log(`🔧 Processing fix job: ${job.id}`, job.data);
-    console.log(`✅ Fix generation complete`);
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs } = job.data;
+    console.log(`🔧 Auto-fix started for ${repositoryFullName}#${prNumber}...`);
+
+    const [owner, repo] = repositoryFullName.split("/");
+
+    // 1. Get PR info (head branch)
+    const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
+    const headBranch = pr.head.ref;
+    const baseBranch = pr.base.ref;
+    console.log(`  📄 PR: "${pr.title}" (head: ${headBranch}, base: ${baseBranch})`);
+
+    // 2. Get the diff to analyze
+    const prDiff = await getPRDiff(owner, repo, prNumber);
+    console.log(`  📄 Diff: ${prDiff.diff.length} chars`);
+
+    // 3. Analyze with AI to find issues
+    const { issues } = await analyzeWithAI(prDiff.diff, RULES);
+    console.log(`  🧠 Found ${issues.length} issues to fix`);
+
+    if (issues.length === 0) {
+      console.log("  ✅ No issues to fix!");
+      if (slackChannel && process.env.SLACK_BOT_TOKEN) {
+        const vts = slackThreadTs && /^\d+\.\d+$/.test(String(slackThreadTs)) ? String(slackThreadTs) : undefined;
+        await slack.chat.postMessage({
+          channel: slackChannel,
+          thread_ts: vts,
+          text: "✅ No issues found to auto-fix — the code looks good!",
+        });
+      }
+      return { filesFixed: 0 };
+    }
+
+    // 4. Group issues by file
+    const issuesByFile: Record<string, any[]> = {};
+    for (const issue of issues) {
+      const file = issue.file || "unknown";
+      if (!issuesByFile[file]) issuesByFile[file] = [];
+      issuesByFile[file].push(issue);
+    }
+
+    // 5. Get changed files and generate fixes
+    const changedFiles = await getPRFiles(owner, repo, prNumber);
+    const fixes: { path: string; content: string }[] = [];
+
+    for (const file of changedFiles) {
+      const fileIssues = issuesByFile[file.filename];
+      if (!fileIssues || fileIssues.length === 0) continue;
+
+      console.log(`  🔧 Fixing ${file.filename} (${fileIssues.length} issues)...`);
+      const content = await getFileContent(owner, repo, headBranch, file.filename);
+      if (!content) continue;
+
+      const fixedContent = await generateFixWithAI(content, fileIssues);
+      if (fixedContent && fixedContent !== content) {
+        fixes.push({ path: file.filename, content: fixedContent });
+      }
+    }
+
+    if (fixes.length === 0) {
+      console.log("  ⚠️  AI couldn't generate any fixes");
+      if (slackChannel && process.env.SLACK_BOT_TOKEN) {
+        const vts = slackThreadTs && /^\d+\.\d+$/.test(String(slackThreadTs)) ? String(slackThreadTs) : undefined;
+        await slack.chat.postMessage({
+          channel: slackChannel,
+          thread_ts: vts,
+          text: "⚠️ Auto-fix analysis found issues but couldn't generate fixes. Manual review recommended.",
+        });
+      }
+      return { filesFixed: 0 };
+    }
+
+    // 6. Create branch, commit fixes, open PR
+    console.log(`  📝 Creating fix PR with ${fixes.length} fixed files...`);
+    const fixPR = await createFixPR(owner, repo, prNumber, baseBranch, fixes);
+    console.log(`  🎉 Fix PR created: ${fixPR.prUrl}`);
+
+    // 7. Notify Slack
+    if (slackChannel && process.env.SLACK_BOT_TOKEN) {
+      await sendFixSlackNotification(slackChannel, slackThreadTs, {
+        originalPrNumber: prNumber,
+        fixPrUrl: fixPR.prUrl,
+        fixPrNumber: fixPR.prNumber,
+        filesFixed: fixes.length,
+      });
+      console.log("  💬 Slack notification sent");
+    }
+
+    console.log(`✅ Auto-fix complete for ${repositoryFullName}#${prNumber}`);
+    return { filesFixed: fixes.length, fixPrUrl: fixPR.prUrl };
   },
   { connection, concurrency: 2 }
 );
