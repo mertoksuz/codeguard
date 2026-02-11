@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 
