@@ -2,9 +2,10 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const needsTls = redisUrl.startsWith("rediss://") || redisUrl.includes("upstash.io");
 const connection = new IORedis(redisUrl, {
   maxRetriesPerRequest: null,
-  tls: redisUrl.startsWith("rediss://") ? { rejectUnauthorized: false } : undefined,
+  tls: needsTls ? { rejectUnauthorized: false } : undefined,
 });
 
 export const analysisQueue = new Queue("analysis", { connection });

@@ -5,9 +5,10 @@ import { Octokit } from "@octokit/rest";
 import { WebClient } from "@slack/web-api";
 
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const needsTls = redisUrl.startsWith("rediss://") || redisUrl.includes("upstash.io");
 const connection = new IORedis(redisUrl, {
   maxRetriesPerRequest: null,
-  tls: redisUrl.startsWith("rediss://") ? { rejectUnauthorized: false } : undefined,
+  tls: needsTls ? { rejectUnauthorized: false } : undefined,
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
