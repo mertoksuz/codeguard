@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { Octokit } from "@octokit/rest";
 import { WebClient } from "@slack/web-api";
 
@@ -11,7 +12,9 @@ const connection = new IORedis(redisUrl, {
   tls: needsTls ? { rejectUnauthorized: false } : undefined,
 });
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const AI_PROVIDER = process.env.AI_PROVIDER || "openai";
+const openai = AI_PROVIDER === "openai" ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const anthropic = AI_PROVIDER === "claude" ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN || process.env.GITHUB_CLIENT_SECRET });
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -31,27 +34,46 @@ async function getPRDiff(owner: string, repo: string, prNumber: number): Promise
   };
 }
 
-// ─── Analyze diff with OpenAI ──────────────────────
-async function analyzeWithAI(diff: string, rules: string[]) {
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o",
-    messages: [
-      {
-        role: "system",
-        content: `You are an expert code reviewer. Analyze the following PR diff for violations of these SOLID and clean-code rules: ${rules.join(", ")}.
+// ─── Analyze diff with AI (OpenAI or Claude) ──────
+const ANALYSIS_SYSTEM_PROMPT = (rules: string[]) =>
+  `You are an expert code reviewer. Analyze the following PR diff for violations of these SOLID and clean-code rules: ${rules.join(", ")}.
 Return JSON: { "issues": [{ "ruleId": string, "ruleName": string, "severity": "error"|"warning"|"info", "file": string, "line": number, "message": string, "suggestion": string }], "score": number }
-score is 0-100 (100 = perfect). Only return the JSON, no other text.`,
-      },
-      { role: "user", content: diff.substring(0, 12000) }, // Limit to avoid token overflow
-    ],
-    temperature: 0.1,
-    max_tokens: 4000,
-    response_format: { type: "json_object" },
-  });
+score is 0-100 (100 = perfect). Only return the JSON, no other text.`;
 
-  const content = response.choices[0]?.message?.content || '{"issues":[],"score":100}';
+async function analyzeWithAI(diff: string, rules: string[]) {
+  const truncatedDiff = diff.substring(0, 12000);
+  let content = '{"issues":[],"score":100}';
+
+  if (AI_PROVIDER === "claude" && anthropic) {
+    console.log("  🤖 Using Claude for analysis...");
+    const response = await anthropic.messages.create({
+      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      system: ANALYSIS_SYSTEM_PROMPT(rules),
+      messages: [{ role: "user", content: truncatedDiff }],
+    });
+    const block = response.content[0];
+    content = block.type === "text" ? block.text : content;
+  } else {
+    console.log("  🤖 Using OpenAI for analysis...");
+    const oa = openai || new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await oa.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o",
+      messages: [
+        { role: "system", content: ANALYSIS_SYSTEM_PROMPT(rules) },
+        { role: "user", content: truncatedDiff },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      response_format: { type: "json_object" },
+    });
+    content = response.choices[0]?.message?.content || content;
+  }
+
   try {
-    const parsed = JSON.parse(content);
+    // Claude may wrap JSON in markdown code blocks
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
     return { issues: parsed.issues || [], score: parsed.score || 100 };
   } catch {
     return { issues: [], score: 100 };
