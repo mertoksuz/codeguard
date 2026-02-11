@@ -12,3 +12,14 @@ services:
       - key: API_PORT
         value: "4000"
       - fromGroup: CodeGuard
+  - type: worker
+    name: codeguard-worker
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: "pnpm install && pnpm run --filter @codeguard/worker build"
+    startCommand: "cd apps/worker && node dist/index.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - fromGroup: CodeGuard

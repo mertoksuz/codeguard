@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
@@ -19,7 +21,22 @@ export async function POST(req: NextRequest) {
       if (match) {
         const [, repo, prNumber] = match;
         console.log(`PR detected: ${repo}#${prNumber} in channel ${event.channel}`);
-        // Queue analysis job
+
+        // Call the API to queue analysis
+        try {
+          await fetch(`${API_URL}/api/reviews/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repositoryFullName: repo,
+              prNumber: parseInt(prNumber, 10),
+              slackChannel: event.channel,
+              slackThreadTs: event.ts,
+            }),
+          });
+        } catch (err) {
+          console.error("Failed to queue analysis:", err);
+        }
       }
     }
   }
