@@ -16,9 +16,21 @@ export async function POST(req: NextRequest) {
   if (body.type === "event_callback") {
     const event = body.event;
 
-    if (event.type === "message" && !event.bot_id && !event.subtype) {
-      const prRegex = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/;
-      const match = event.text?.match(prRegex);
+    console.log("[Slack Event] Event detail:", JSON.stringify({ type: event.type, subtype: event.subtype, bot_id: event.bot_id, text: event.text?.substring(0, 200) }));
+
+    // Accept regular messages and message_changed (link unfurl)
+    if (event.type === "message" && !event.bot_id) {
+      // Skip subtypes that aren't relevant (but allow message_changed for unfurls)
+      if (event.subtype && event.subtype !== "message_changed") {
+        return NextResponse.json({ ok: true });
+      }
+
+      // Get text from the message or from the edited message
+      const messageText = event.text || event.message?.text || "";
+
+      // Slack wraps URLs in <>, so match both formats
+      const prRegex = /github\.com\/([^/|>]+\/[^/|>]+)\/pull\/(\d+)/;
+      const match = messageText.match(prRegex);
 
       if (match) {
         const [, repo, prNumber] = match;
