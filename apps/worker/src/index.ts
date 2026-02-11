@@ -65,44 +65,94 @@ async function sendSlackResult(
   result: { prTitle: string; prUrl: string; prNumber: number; score: number; issues: any[] }
 ) {
   const scoreEmoji = result.score >= 80 ? "🟢" : result.score >= 60 ? "🟡" : "🔴";
+  const scoreBar = buildScoreBar(result.score);
 
-  const blocks: any[] = [
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: `🔍 *CodeGuard Analysis Complete*\n<${result.prUrl}|${result.prTitle} (#${result.prNumber})>` },
-    },
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: `*Score:* ${scoreEmoji} ${result.score}/100` },
-        { type: "mrkdwn", text: `*Issues:* ${result.issues.length}` },
-      ],
-    },
-  ];
-
-  if (result.issues.length > 0) {
-    const issueText = result.issues.slice(0, 5).map((i: any) => {
-      const icon = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟡" : "🔵";
-      return `${icon} *${i.ruleName}* — ${i.message}`;
-    }).join("\n");
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: issueText } });
-
-    if (result.issues.length > 5) {
-      blocks.push({ type: "section", text: { type: "mrkdwn", text: `_...and ${result.issues.length - 5} more issues_` } });
-    }
-  } else {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "✅ *No issues found!* This PR looks clean." } });
-  }
+  const violations = result.issues.filter((i: any) => i.severity === "error");
+  const warnings = result.issues.filter((i: any) => i.severity === "warning");
+  const infos = result.issues.filter((i: any) => i.severity === "info");
 
   // Slack thread_ts must be a string like "1707667890.123456"
   const validThreadTs = threadTs && /^\d+\.\d+$/.test(String(threadTs)) ? String(threadTs) : undefined;
 
+  const blocks: any[] = [
+    // ── Header ──
+    {
+      type: "header",
+      text: { type: "plain_text", text: "🔍 CodeGuard Analysis Complete", emoji: true },
+    },
+    // ── PR Link ──
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*<${result.prUrl}|${result.prTitle}>*  ·  \`PR #${result.prNumber}\`` },
+    },
+    { type: "divider" },
+    // ── Score + Stats ──
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Quality Score*\n${scoreEmoji} *${result.score}*/100\n${scoreBar}` },
+        { type: "mrkdwn", text: `*Summary*\n🔴  *${violations.length}* Violation${violations.length !== 1 ? "s" : ""}\n🟡  *${warnings.length}* Warning${warnings.length !== 1 ? "s" : ""}\n🔵  *${infos.length}* Info` },
+      ],
+    },
+  ];
+
+  // ── Issues Detail ──
+  if (result.issues.length > 0) {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: "*Issues Found:*" },
+    });
+
+    const issueLines = result.issues.slice(0, 8).map((i: any) => {
+      const icon = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟡" : "🔵";
+      const file = i.file ? `  \`${i.file}${i.line ? `:${i.line}` : ""}\`` : "";
+      return `${icon}  *${i.ruleName}*${file}\n      ${i.message}`;
+    });
+
+    // Split into chunks of 4 to stay within Slack's text limits
+    for (let i = 0; i < issueLines.length; i += 4) {
+      const chunk = issueLines.slice(i, i + 4).join("\n\n");
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: chunk } });
+    }
+
+    if (result.issues.length > 8) {
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `_...and *${result.issues.length - 8}* more issues. View full report for details._` }],
+      });
+    }
+  } else {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: "✅  *No issues found!* This PR looks clean and follows all configured rules." },
+    });
+  }
+
+  // ── Footer ──
+  blocks.push({ type: "divider" });
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `⚡ Powered by *CodeGuard AI*  ·  Analyzed ${result.issues.length} issue${result.issues.length !== 1 ? "s" : ""} across SOLID principles, complexity & clean code rules` },
+    ],
+  });
+
   await slack.chat.postMessage({
     channel,
     thread_ts: validThreadTs,
+    reply_broadcast: false,
+    unfurl_links: false,
     blocks,
-    text: `Analysis complete for PR #${result.prNumber}: ${result.score}/100`,
+    text: `CodeGuard Analysis: PR #${result.prNumber} scored ${result.score}/100 with ${result.issues.length} issue(s)`,
   });
+}
+
+function buildScoreBar(score: number): string {
+  const filled = Math.round(score / 10);
+  const empty = 10 - filled;
+  return "▓".repeat(filled) + "░".repeat(empty);
 }
 
 // ─── Analysis Worker ───────────────────────────────
