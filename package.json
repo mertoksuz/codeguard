@@ -1,0 +1,31 @@
+{
+  "name": "codeguard-ai",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@codeguard/web",
+    "dev:api": "turbo run dev --filter=@codeguard/api",
+    "dev:worker": "turbo run dev --filter=@codeguard/worker",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "db:generate": "turbo run db:generate --filter=@codeguard/db",
+    "db:push": "turbo run db:push --filter=@codeguard/db",
+    "db:migrate": "turbo run db:migrate --filter=@codeguard/db",
+    "db:seed": "turbo run db:seed --filter=@codeguard/db",
+    "db:studio": "turbo run db:studio --filter=@codeguard/db",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

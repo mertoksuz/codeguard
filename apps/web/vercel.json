@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && pnpm install && pnpm --filter @codeguard/web build",
+  "outputDirectory": ".next",
+  "installCommand": "corepack enable && pnpm install",
+  "ignoreCommand": "npx turbo-ignore",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@api_url",
+    "NEXTAUTH_SECRET": "@nextauth_secret",
+    "NEXTAUTH_URL": "@nextauth_url",
+    "GITHUB_CLIENT_ID": "@github_client_id",
+    "GITHUB_CLIENT_SECRET": "@github_client_secret",
+    "DATABASE_URL": "@database_url"
+  }
+}

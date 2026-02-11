@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: codeguard-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: "cd ../.. && corepack enable && pnpm install && cd packages/db && pnpm exec prisma generate && cd ../../apps/api && pnpm run build"
+    startCommand: "node dist/index.js"
+    rootDir: apps/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_PORT
+        value: "4000"
+      - key: DATABASE_URL
+        fromGroup: codeguard-secrets
+      - key: REDIS_URL
+        fromGroup: codeguard-secrets
+      - key: NEXTAUTH_URL
+        fromGroup: codeguard-secrets
+      - key: OPENAI_API_KEY
+        fromGroup: codeguard-secrets
+      - key: SLACK_BOT_TOKEN
+        fromGroup: codeguard-secrets
+      - key: SLACK_SIGNING_SECRET
+        fromGroup: codeguard-secrets
+      - key: GITHUB_CLIENT_ID
+        fromGroup: codeguard-secrets
+      - key: GITHUB_CLIENT_SECRET
+        fromGroup: codeguard-secrets

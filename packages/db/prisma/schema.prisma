@@ -1,0 +1,274 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Users ──────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          UserRole  @default(MEMBER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  teamMembers   TeamMember[]
+  reviews       Review[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─── Teams & Organizations ─────────────────────────
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       TeamMember[]
+  repositories  Repository[]
+  ruleConfigs   RuleConfig[]
+  subscription  Subscription?
+  slackInstall  SlackInstallation?
+  githubInstall GitHubInstallation?
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id     String     @id @default(cuid())
+  role   MemberRole @default(MEMBER)
+  userId String
+  teamId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@map("team_members")
+}
+
+// ─── Repositories ──────────────────────────────────
+
+model Repository {
+  id        String   @id @default(cuid())
+  name      String
+  fullName  String
+  owner     String
+  url       String
+  isActive  Boolean  @default(true)
+  teamId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  reviews Review[]
+
+  @@unique([fullName, teamId])
+  @@map("repositories")
+}
+
+// ─── Code Reviews ──────────────────────────────────
+
+model Review {
+  id           String       @id @default(cuid())
+  prNumber     Int
+  prTitle      String
+  prUrl        String
+  branch       String
+  status       ReviewStatus @default(PENDING)
+  totalIssues  Int          @default(0)
+  criticalCount Int         @default(0)
+  warningCount  Int         @default(0)
+  infoCount     Int         @default(0)
+  fixPrUrl     String?
+  fixPrNumber  Int?
+  analysisTime Int?         // ms
+  repositoryId String
+  authorId     String?
+  slackTs      String?      // Slack message timestamp
+  slackChannel String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  author     User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  issues     Issue[]
+
+  @@index([repositoryId])
+  @@index([status])
+  @@map("reviews")
+}
+
+model Issue {
+  id         String   @id @default(cuid())
+  ruleId     String
+  ruleName   String
+  severity   Severity
+  file       String
+  line       Int
+  message    String   @db.Text
+  suggestion String?  @db.Text
+  fixApplied Boolean  @default(false)
+  fixCode    String?  @db.Text
+  reviewId   String
+  createdAt  DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([ruleId])
+  @@map("issues")
+}
+
+// ─── Rule Configuration ────────────────────────────
+
+model RuleConfig {
+  id       String   @id @default(cuid())
+  ruleId   String
+  enabled  Boolean  @default(true)
+  severity Severity @default(WARNING)
+  teamId   String
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, teamId])
+  @@map("rule_configs")
+}
+
+// ─── Integrations ──────────────────────────────────
+
+model SlackInstallation {
+  id          String   @id @default(cuid())
+  teamSlackId String   @unique
+  botToken    String   @db.Text
+  botUserId   String
+  channel     String?
+  teamId      String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("slack_installations")
+}
+
+model GitHubInstallation {
+  id             String   @id @default(cuid())
+  installationId Int      @unique
+  accountLogin   String
+  accountType    String   // "User" | "Organization"
+  accessToken    String?  @db.Text
+  tokenExpiresAt DateTime?
+  teamId         String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("github_installations")
+}
+
+// ─── Subscriptions & Billing ───────────────────────
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  stripeCustomerId     String             @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  teamId               String             @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ─── Enums ─────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum ReviewStatus {
+  PENDING
+  ANALYZING
+  COMPLETED
+  FIXING
+  FIXED
+  FAILED
+}
+
+enum Severity {
+  ERROR
+  WARNING
+  INFO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
