@@ -15,6 +15,8 @@ const envSchema = z.object({
   GITHUB_APP_ID: z.string().default(""),
   GITHUB_APP_PRIVATE_KEY: z.string().default(""),
   SLACK_BOT_TOKEN: z.string().default(""),
+  API_SECRET: z.string().default(""),
+  NEXTAUTH_SECRET: z.string().default(""),
 });
 
 export const env = envSchema.parse(process.env);

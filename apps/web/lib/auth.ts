@@ -1,0 +1,107 @@
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import { type NextAuthOptions } from "next-auth";
+import GitHubProvider from "next-auth/providers/github";
+import { prisma } from "@codeguard/db";
+
+function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .substring(0, 48);
+}
+
+export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma) as any,
+  providers: [
+    GitHubProvider({
+      clientId: process.env.GITHUB_OAUTH_CLIENT_ID || "",
+      clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || "",
+    }),
+  ],
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
+  pages: {
+    signIn: "/auth/login",
+    newUser: "/dashboard",
+  },
+  callbacks: {
+    async signIn({ user, account, profile }) {
+      // Store GitHub access token on the account record
+      if (account && account.provider === "github" && user.id) {
+        // Auto-create a Team for first-time users
+        const existingMembership = await prisma.teamMember.findFirst({
+          where: { userId: user.id },
+        });
+
+        if (!existingMembership) {
+          const teamName = (profile as any)?.login
+            ? `${(profile as any).login}'s Team`
+            : `${user.name || "My"}'s Team`;
+
+          const baseSlug = generateSlug((profile as any)?.login || user.name || "team");
+          // Ensure unique slug
+          let slug = baseSlug;
+          let counter = 0;
+          while (await prisma.team.findUnique({ where: { slug } })) {
+            counter++;
+            slug = `${baseSlug}-${counter}`;
+          }
+
+          await prisma.team.create({
+            data: {
+              name: teamName,
+              slug,
+              plan: "FREE",
+              members: {
+                create: {
+                  userId: user.id,
+                  role: "OWNER",
+                },
+              },
+            },
+          });
+        }
+      }
+      return true;
+    },
+
+    async jwt({ token, user, account }) {
+      if (user) {
+        token.userId = user.id;
+      }
+      if (account?.access_token) {
+        token.githubAccessToken = account.access_token;
+      }
+
+      // Attach teamId to token
+      if (token.userId && !token.teamId) {
+        const membership = await prisma.teamMember.findFirst({
+          where: { userId: token.userId as string },
+          include: { team: true },
+        });
+        if (membership) {
+          token.teamId = membership.teamId;
+          token.teamSlug = membership.team.slug;
+          token.teamPlan = membership.team.plan;
+          token.teamRole = membership.role;
+        }
+      }
+
+      return token;
+    },
+
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as any).id = token.userId;
+        (session.user as any).teamId = token.teamId;
+        (session.user as any).teamSlug = token.teamSlug;
+        (session.user as any).teamPlan = token.teamPlan;
+        (session.user as any).teamRole = token.teamRole;
+      }
+      return session;
+    },
+  },
+};

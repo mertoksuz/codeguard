@@ -57,6 +57,15 @@ model Session {
   @@map("sessions")
 }
 
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
 // ─── Teams & Organizations ─────────────────────────
 
 model Team {
@@ -69,6 +78,7 @@ model Team {
 
   members       TeamMember[]
   repositories  Repository[]
+  reviews       Review[]
   ruleConfigs   RuleConfig[]
   subscription  Subscription?
   slackInstall  SlackInstallation?
@@ -123,10 +133,12 @@ model Review {
   criticalCount Int         @default(0)
   warningCount  Int         @default(0)
   infoCount     Int         @default(0)
+  score        Int          @default(0)
   fixPrUrl     String?
   fixPrNumber  Int?
   analysisTime Int?         // ms
   repositoryId String
+  teamId       String?
   authorId     String?
   slackTs      String?      // Slack message timestamp
   slackChannel String?
@@ -134,10 +146,12 @@ model Review {
   updatedAt    DateTime     @updatedAt
 
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  team       Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
   author     User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
   issues     Issue[]
 
   @@index([repositoryId])
+  @@index([teamId])
   @@index([status])
   @@map("reviews")
 }
@@ -214,17 +228,18 @@ model GitHubInstallation {
 // ─── Subscriptions & Billing ───────────────────────
 
 model Subscription {
-  id                   String             @id @default(cuid())
-  stripeCustomerId     String             @unique
-  stripeSubscriptionId String?            @unique
-  stripePriceId        String?
-  status               SubscriptionStatus @default(ACTIVE)
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  teamId               String             @unique
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                     String             @id @default(cuid())
+  iyzicoCustomerEmail    String?
+  iyzicoSubscriptionRef  String?            @unique
+  iyzicoPricingPlanRef   String?
+  iyzicoPaymentCardToken String?            @db.Text
+  status                 SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  teamId                 String             @unique
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 

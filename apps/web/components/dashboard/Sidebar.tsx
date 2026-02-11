@@ -1,8 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
+
+interface SidebarUser {
+  id?: string;
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+  teamId?: string;
+  teamSlug?: string;
+  teamPlan?: string;
+  teamRole?: string;
+}
 
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: "📊" },
@@ -12,8 +25,19 @@ const navItems = [
   { label: "Settings", href: "/dashboard/settings", icon: "⚙️" },
 ];
 
-export function Sidebar() {
+const planLimits: Record<string, number> = {
+  free: 50,
+  pro: 500,
+  enterprise: 9999,
+};
+
+export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname();
+
+  const displayName = user.name || user.email?.split("@")[0] || "User";
+  const initials = displayName.charAt(0).toUpperCase();
+  const plan = user.teamPlan || "free";
+  const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1) + " Plan";
 
   return (
     <aside className="w-64 bg-surface-900 text-white flex flex-col min-h-screen">
@@ -48,22 +72,32 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-surface-700">
-        <div className="bg-surface-800 rounded-xl p-3 mb-3">
-          <div className="flex justify-between text-xs mb-1.5">
-            <span className="text-surface-400">Reviews Used</span>
-            <span className="text-brand-400 font-semibold">23/50</span>
-          </div>
-          <div className="w-full bg-surface-700 rounded-full h-1.5">
-            <div className="bg-brand-500 h-1.5 rounded-full" style={{ width: "46%" }} />
-          </div>
-        </div>
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white font-bold text-xs">M</div>
+        <div className="flex items-center gap-3 px-2 mb-3">
+          {user.image ? (
+            <Image
+              src={user.image}
+              alt={displayName}
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-full"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white font-bold text-xs">
+              {initials}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">Mert</div>
-            <div className="text-xs text-surface-400 truncate">Free Plan</div>
+            <div className="text-sm font-medium truncate">{displayName}</div>
+            <div className="text-xs text-surface-400 truncate">{planLabel}</div>
           </div>
         </div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/" })}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-surface-400 hover:text-white hover:bg-surface-800 transition-all"
+        >
+          <span className="text-lg">🚪</span>
+          Sign Out
+        </button>
       </div>
     </aside>
   );

@@ -21,7 +21,9 @@
     "lucide-react": "^0.330.0",
     "zustand": "^4.5.0",
     "next-auth": "^4.24.0",
-    "@prisma/client": "^5.10.0"
+    "@auth/prisma-adapter": "^1.4.0",
+    "@prisma/client": "^5.10.0",
+    "@codeguard/db": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
