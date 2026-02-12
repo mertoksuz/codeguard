@@ -31,8 +31,8 @@
 
   .glow {
     box-shadow:
-      0 0 20px rgba(16, 185, 129, 0.2),
-      0 0 60px rgba(16, 185, 129, 0.1);
+      0 0 20px rgba(139, 92, 246, 0.25),
+      0 0 60px rgba(139, 92, 246, 0.1);
   }
 
   .code-block {
@@ -42,7 +42,7 @@
   .dot-pattern {
     background-image: radial-gradient(
       circle,
-      rgba(16, 185, 129, 0.15) 1px,
+      rgba(139, 92, 246, 0.12) 1px,
       transparent 1px
     );
     background-size: 24px 24px;
