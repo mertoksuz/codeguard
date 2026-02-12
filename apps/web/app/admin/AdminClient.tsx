@@ -87,12 +87,20 @@ export default function AdminClient() {
             <h1 className="text-3xl font-extrabold text-gray-900">Admin Panel</h1>
             <p className="text-gray-500 mt-1">Manage teams and plans</p>
           </div>
-          <a
-            href="/dashboard"
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-          >
-            ← Back to Dashboard
-          </a>
+          <div className="flex items-center gap-4">
+            <a
+              href="/admin/tickets"
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors"
+            >
+              🎫 Support Tickets
+            </a>
+            <a
+              href="/dashboard"
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
+              ← Back to Dashboard
+            </a>
+          </div>
         </div>
 
         {message && (

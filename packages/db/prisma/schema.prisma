@@ -19,10 +19,12 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  teamMembers   TeamMember[]
-  reviews       Review[]
+  accounts       Account[]
+  sessions       Session[]
+  teamMembers    TeamMember[]
+  reviews        Review[]
+  tickets        Ticket[]
+  ticketMessages TicketMessage[]
 
   @@map("users")
 }
@@ -87,6 +89,7 @@ model Team {
   payments      Payment[]
   slackInstall  SlackInstallation?
   githubInstall GitHubInstallation?
+  tickets       Ticket[]
 
   @@map("teams")
 }
@@ -294,7 +297,58 @@ model Payment {
   @@map("payments")
 }
 
+// ─── Support Tickets ───────────────────────────────
+
+model Ticket {
+  id          String         @id @default(cuid())
+  subject     String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(NORMAL)
+  userId      String
+  teamId      String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team     Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+
+  @@index([teamId])
+  @@index([userId])
+  @@index([status])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id        String   @id @default(cuid())
+  body      String   @db.Text
+  isAdmin   Boolean  @default(false)
+  ticketId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
 // ─── Enums ─────────────────────────────────────────
+
+enum TicketStatus {
+  OPEN
+  AWAITING_REPLY
+  RESPONDED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
 
 enum UserRole {
   ADMIN

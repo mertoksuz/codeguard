@@ -22,6 +22,7 @@ const navItems = [
   { label: "Reviews", href: "/dashboard/reviews", icon: "🔍" },
   { label: "Rules", href: "/dashboard/rules", icon: "📏" },
   { label: "Integrations", href: "/dashboard/integrations", icon: "🔗" },
+  { label: "Support", href: "/dashboard/support", icon: "🎫" },
   { label: "Settings", href: "/dashboard/settings", icon: "⚙️" },
 ];
 
