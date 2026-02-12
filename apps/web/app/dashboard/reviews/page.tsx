@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@codeguard/db";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { ExpandableIssues } from "@/components/dashboard/ExpandableIssues";
 
 const statusColor: Record<string, "brand" | "success" | "warning" | "info"> = {
   PENDING: "info",
@@ -15,12 +16,6 @@ const statusColor: Record<string, "brand" | "success" | "warning" | "info"> = {
   FIXING: "brand",
   FIXED: "success",
   FAILED: "info",
-};
-
-const severityColor: Record<string, string> = {
-  ERROR: "text-red-600 bg-red-50",
-  WARNING: "text-amber-600 bg-amber-50",
-  INFO: "text-blue-600 bg-blue-50",
 };
 
 export default async function ReviewsPage() {
@@ -38,7 +33,6 @@ export default async function ReviewsPage() {
           repository: { select: { fullName: true } },
           _count: { select: { issues: true } },
           issues: {
-            take: 5,
             orderBy: { severity: "asc" },
             select: { id: true, ruleName: true, severity: true, message: true, file: true, line: true },
           },
@@ -115,35 +109,13 @@ export default async function ReviewsPage() {
                   {r.analysisTime && <span>⏱ {(r.analysisTime / 1000).toFixed(1)}s</span>}
                 </div>
 
-                {/* Top issues preview */}
+                {/* Issues preview with expand */}
                 {r.issues.length > 0 && (
-                  <div className="bg-surface-50 rounded-xl p-3 space-y-2">
-                    {r.issues.map((issue) => (
-                      <div key={issue.id} className="flex items-start gap-2 text-xs">
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                            severityColor[issue.severity] || ""
-                          }`}
-                        >
-                          {issue.severity}
-                        </span>
-                        <span className="text-surface-600">
-                          <strong>{issue.ruleName}</strong> — {issue.message}
-                        </span>
-                        <span className="text-surface-400 ml-auto shrink-0">
-                          {issue.file}:{issue.line}
-                        </span>
-                      </div>
-                    ))}
-                    {r._count.issues > 5 && (
-                      <Link
-                        href={`/dashboard/reviews/${r.id}`}
-                        className="text-xs text-brand-600 hover:text-brand-700 font-medium pt-1 inline-block"
-                      >
-                        +{r._count.issues - 5} more issues →
-                      </Link>
-                    )}
-                  </div>
+                  <ExpandableIssues
+                    issues={r.issues}
+                    totalCount={r._count.issues}
+                    reviewId={r.id}
+                  />
                 )}
 
                 {/* Fix PR link */}
