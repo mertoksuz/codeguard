@@ -30,12 +30,25 @@ export const authOptions: NextAuthOptions = {
     newUser: "/dashboard",
   },
   callbacks: {
-    async signIn({ user, account, profile }) {
-      // Store GitHub access token on the account record
-      if (account && account.provider === "github" && user.id) {
+    async signIn() {
+      // Allow all sign-ins — team creation happens in jwt callback
+      // where the user is guaranteed to be persisted in the DB
+      return true;
+    },
+
+    async jwt({ token, user, account, profile }) {
+      if (user) {
+        token.userId = user.id;
+      }
+      if (account?.access_token) {
+        token.githubAccessToken = account.access_token;
+      }
+
+      // On first sign-in (user + account present), create team if needed
+      // At this point the PrismaAdapter has already persisted the User
+      if (user && account && account.provider === "github") {
         const githubLogin = (profile as any)?.login || user.name || "user";
 
-        // Auto-create a Team for first-time users
         let membership = await prisma.teamMember.findFirst({
           where: { userId: user.id },
         });
@@ -46,7 +59,6 @@ export const authOptions: NextAuthOptions = {
             : `${user.name || "My"}'s Team`;
 
           const baseSlug = generateSlug((profile as any)?.login || user.name || "team");
-          // Ensure unique slug
           let slug = baseSlug;
           let counter = 0;
           while (await prisma.team.findUnique({ where: { slug } })) {
@@ -92,19 +104,20 @@ export const authOptions: NextAuthOptions = {
             },
           });
         }
-      }
-      return true;
-    },
 
-    async jwt({ token, user, account }) {
-      if (user) {
-        token.userId = user.id;
-      }
-      if (account?.access_token) {
-        token.githubAccessToken = account.access_token;
+        // Attach team info to token immediately
+        if (membership) {
+          const team = await prisma.team.findUnique({ where: { id: membership.teamId } });
+          if (team) {
+            token.teamId = membership.teamId;
+            token.teamSlug = team.slug;
+            token.teamPlan = team.plan;
+            token.teamRole = membership.role;
+          }
+        }
       }
 
-      // Attach teamId to token
+      // For subsequent requests, attach teamId if not present
       if (token.userId && !token.teamId) {
         const membership = await prisma.teamMember.findFirst({
           where: { userId: token.userId as string },
