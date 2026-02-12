@@ -12,6 +12,7 @@ function generateSlug(name: string): string {
 }
 
 export const authOptions: NextAuthOptions = {
+  debug: process.env.NODE_ENV === "development" || !!process.env.NEXTAUTH_DEBUG,
   adapter: PrismaAdapter(prisma) as any,
   providers: [
     GitHubProvider({
@@ -25,6 +26,7 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/auth/login",
+    error: "/auth/error",
     newUser: "/dashboard",
   },
   callbacks: {
