@@ -379,7 +379,7 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
           <Card>
             <CardHeader>
               <CardTitle>Payment History</CardTitle>
-              <CardDescription>Recent transactions</CardDescription>
+              <CardDescription>Recent transactions — click to view or download invoice</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -412,8 +412,24 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
                         </div>
                       </div>
                     </div>
-                    <div className="text-sm font-semibold text-surface-900">
-                      {payment.amountFormatted}
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-semibold text-surface-900">
+                        {payment.amountFormatted}
+                      </div>
+                      {payment.status === "SUCCESS" && (
+                        <a
+                          href={`/api/billing/invoice/${payment.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 hover:bg-brand-100 rounded-lg transition-colors"
+                          title="View & download invoice"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Invoice
+                        </a>
+                      )}
                     </div>
                   </div>
                 ))}
