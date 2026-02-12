@@ -32,7 +32,11 @@ export default async function IntegrationsPage() {
       desc: "Receive analysis results and trigger reviews from Slack",
       icon: "💬",
       connected: !!slackInstall?.botToken,
-      detail: slackInstall?.channel ? `#${slackInstall.channel}` : null,
+      detail: slackInstall?.teamSlackName
+        ? slackInstall.teamSlackName
+        : slackInstall?.channel
+          ? `#${slackInstall.channel}`
+          : null,
     },
     {
       name: "GitLab",
@@ -75,6 +79,12 @@ export default async function IntegrationsPage() {
                 <p className="text-xs text-surface-400">
                   Signs in with your GitHub account automatically
                 </p>
+              ) : int.name === "Slack" ? (
+                <a href="/api/slack/install">
+                  <Button variant="primary" size="sm" className="w-full">
+                    Connect Slack
+                  </Button>
+                </a>
               ) : (
                 <Button variant="primary" size="sm" className="w-full">
                   Connect

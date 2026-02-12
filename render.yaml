@@ -4,7 +4,7 @@ services:
     runtime: node
     region: frankfurt
     plan: free
-    buildCommand: "COREPACK_ENABLE_STRICT=0 NODE_ENV=development pnpm install --frozen-lockfile=false && pnpm --filter @codeguard/db exec prisma generate && pnpm run --filter @codeguard/api build"
+    buildCommand: "COREPACK_ENABLE_STRICT=0 NODE_ENV=development pnpm install --frozen-lockfile=false && pnpm --filter @codeguard/db exec prisma generate && pnpm --filter @codeguard/db exec prisma db push --skip-generate && pnpm run --filter @codeguard/api build"
     startCommand: "cd apps/api && node dist/index.js"
     envVars:
       - key: NODE_ENV
@@ -17,7 +17,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: "COREPACK_ENABLE_STRICT=0 NODE_ENV=development pnpm install --frozen-lockfile=false && pnpm run --filter @codeguard/worker build"
+    buildCommand: "COREPACK_ENABLE_STRICT=0 NODE_ENV=development pnpm install --frozen-lockfile=false && pnpm --filter @codeguard/db exec prisma generate && pnpm run --filter @codeguard/worker build"
     startCommand: "cd apps/worker && node dist/index.js"
     envVars:
       - key: NODE_ENV

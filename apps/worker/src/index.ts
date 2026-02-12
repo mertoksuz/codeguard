@@ -21,7 +21,7 @@ const anthropic = AI_PROVIDER === "claude" ? new Anthropic({ apiKey: process.env
 
 // Fallback Octokit for single-tenant / backwards compat
 const fallbackOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN || process.env.GITHUB_CLIENT_SECRET });
-const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+const fallbackSlack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
  * Get an authenticated Octokit instance for a team.
@@ -43,6 +43,27 @@ async function getOctokitForTeam(teamId?: string): Promise<Octokit> {
   }
   // Fallback to env var (backwards compat)
   return fallbackOctokit;
+}
+
+/**
+ * Get a Slack WebClient for a team.
+ * Looks up the team's bot token from the DB, falls back to env var.
+ */
+async function getSlackForTeam(teamId?: string): Promise<WebClient> {
+  if (teamId) {
+    try {
+      const install = await prisma.slackInstallation.findUnique({
+        where: { teamId },
+        select: { botToken: true },
+      });
+      if (install?.botToken) {
+        return new WebClient(install.botToken);
+      }
+    } catch (e: any) {
+      console.warn(`  ⚠️  Could not fetch Slack token for team ${teamId}: ${e.message}`);
+    }
+  }
+  return fallbackSlack;
 }
 
 const RULES = ["SRP", "OCP", "LSP", "ISP", "DIP", "NAMING", "COMPLEXITY", "FILE_LENGTH", "IMPORTS"];
@@ -109,6 +130,7 @@ async function analyzeWithAI(diff: string, rules: string[]) {
 
 // ─── Send results to Slack ─────────────────────────
 async function sendSlackResult(
+  slack: WebClient,
   channel: string,
   threadTs: string | undefined,
   result: { prTitle: string; prUrl: string; prNumber: number; score: number; issues: any[] }
@@ -226,8 +248,9 @@ const analysisWorker = new Worker(
     console.log(`  🧠 AI found ${issues.length} issues, score: ${score}/100`);
 
     // 3. Send Slack notification
-    if (slackChannel && process.env.SLACK_BOT_TOKEN) {
-      await sendSlackResult(slackChannel, slackThreadTs, {
+    if (slackChannel) {
+      const slackClient = await getSlackForTeam(teamId);
+      await sendSlackResult(slackClient, slackChannel, slackThreadTs, {
         prTitle: pr.title,
         prUrl: pr.url,
         prNumber,
@@ -366,6 +389,7 @@ async function createFixPR(
 
 // ─── Send fix result to Slack ──────────────────────
 async function sendFixSlackNotification(
+  slack: WebClient,
   channel: string,
   threadTs: string | undefined,
   result: { originalPrNumber: number; fixPrUrl: string; fixPrNumber: number; filesFixed: number }
@@ -437,6 +461,7 @@ const fixWorker = new Worker(
 
     const [owner, repo] = repositoryFullName.split("/");
     const octokit = await getOctokitForTeam(teamId);
+    const slackClient = await getSlackForTeam(teamId);
 
     // 1. Get PR info (head branch)
     const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
@@ -454,9 +479,9 @@ const fixWorker = new Worker(
 
     if (issues.length === 0) {
       console.log("  ✅ No issues to fix!");
-      if (slackChannel && process.env.SLACK_BOT_TOKEN) {
+      if (slackChannel) {
         const vts = slackThreadTs && /^\d+\.\d+$/.test(String(slackThreadTs)) ? String(slackThreadTs) : undefined;
-        await slack.chat.postMessage({
+        await slackClient.chat.postMessage({
           channel: slackChannel,
           thread_ts: vts,
           text: "✅ No issues found to auto-fix — the code looks good!",
@@ -493,9 +518,9 @@ const fixWorker = new Worker(
 
     if (fixes.length === 0) {
       console.log("  ⚠️  AI couldn't generate any fixes");
-      if (slackChannel && process.env.SLACK_BOT_TOKEN) {
+      if (slackChannel) {
         const vts = slackThreadTs && /^\d+\.\d+$/.test(String(slackThreadTs)) ? String(slackThreadTs) : undefined;
-        await slack.chat.postMessage({
+        await slackClient.chat.postMessage({
           channel: slackChannel,
           thread_ts: vts,
           text: "⚠️ Auto-fix analysis found issues but couldn't generate fixes. Manual review recommended.",
@@ -510,8 +535,8 @@ const fixWorker = new Worker(
     console.log(`  🎉 Fix PR created: ${fixPR.prUrl}`);
 
     // 7. Notify Slack
-    if (slackChannel && process.env.SLACK_BOT_TOKEN) {
-      await sendFixSlackNotification(slackChannel, slackThreadTs, {
+    if (slackChannel) {
+      await sendFixSlackNotification(slackClient, slackChannel, slackThreadTs, {
         originalPrNumber: prNumber,
         fixPrUrl: fixPR.prUrl,
         fixPrNumber: fixPR.prNumber,

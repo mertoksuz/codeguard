@@ -11,6 +11,8 @@
         "DATABASE_URL",
         "SLACK_BOT_TOKEN",
         "SLACK_SIGNING_SECRET",
+        "SLACK_CLIENT_ID",
+        "SLACK_CLIENT_SECRET",
         "REDIS_URL",
         "GITHUB_OAUTH_CLIENT_ID",
         "GITHUB_OAUTH_CLIENT_SECRET",

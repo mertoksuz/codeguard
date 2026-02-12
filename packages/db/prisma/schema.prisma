@@ -195,14 +195,19 @@ model RuleConfig {
 // ─── Integrations ──────────────────────────────────
 
 model SlackInstallation {
-  id          String   @id @default(cuid())
-  teamSlackId String   @unique
-  botToken    String   @db.Text
-  botUserId   String
-  channel     String?
-  teamId      String   @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  teamSlackId     String   @unique  // Slack workspace ID (e.g. T01234)
+  teamSlackName   String?            // Slack workspace name
+  botToken        String   @db.Text  // xoxb-... Bot User OAuth Token
+  botUserId       String             // Bot user ID in the workspace
+  appId           String?            // Slack App ID
+  channel         String?            // Default channel for notifications
+  scope           String?            // OAuth scopes granted
+  installedBy     String?            // Slack user ID who installed
+  incomingWebhook String?  @db.Text  // Incoming webhook URL (optional)
+  teamId          String   @unique   // Our internal team ID
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
