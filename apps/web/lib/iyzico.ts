@@ -1,16 +1,26 @@
 /**
- * iyzico Payment Integration
+ * iyzico Payment Integration — using official iyzipay SDK
  * Docs: https://dev.iyzipay.com/en
  *
- * Uses iyzico's checkout form (iyzico 3D Secure) for PCI compliance.
+ * Uses iyzico's checkout form (3D Secure) for PCI compliance.
  * All amounts are in kuruş (TL cents): 1 TL = 100 kuruş
  */
 
-import crypto from "crypto";
+// @ts-expect-error — iyzipay has no type declarations
+import Iyzipay from "iyzipay";
 
-const API_KEY = process.env.IYZICO_API_KEY || "";
-const SECRET_KEY = process.env.IYZICO_SECRET_KEY || "";
-const BASE_URL = process.env.IYZICO_BASE_URL || "https://sandbox-api.iyzipay.com";
+// Lazy-init to avoid crashing during Next.js build (no env vars at build time)
+let _iyzipay: any = null;
+function getIyzipay() {
+  if (!_iyzipay) {
+    _iyzipay = new Iyzipay({
+      apiKey: process.env.IYZICO_API_KEY || "",
+      secretKey: process.env.IYZICO_SECRET_KEY || "",
+      uri: process.env.IYZICO_BASE_URL || "https://sandbox-api.iyzipay.com",
+    });
+  }
+  return _iyzipay;
+}
 
 // ─── Plan Definitions ─────────────────────────────
 export const PLANS = {
@@ -71,41 +81,17 @@ export const PLANS = {
 
 export type PlanKey = keyof typeof PLANS;
 
-// ─── iyzico Authentication ────────────────────────
-function generateAuthHeader(uri: string, body: string): Record<string, string> {
-  const randomStr = Math.random().toString(36).substring(2, 14);
-  const hashStr = API_KEY + randomStr + SECRET_KEY + body;
-  const pkiHash = crypto.createHash("sha1").update(hashStr).digest("base64");
-  const authorizationStr = `IYZWS ${API_KEY}:${pkiHash}`;
-
-  return {
-    "Content-Type": "application/json",
-    Authorization: authorizationStr,
-    "x-iyzi-rnd": randomStr,
-  };
-}
-
-async function iyzicoRequest<T = any>(
-  endpoint: string,
-  body: Record<string, any>
+// ─── Helper: promisify SDK callbacks ──────────────
+function sdkCall<T = any>(
+  fn: (params: any, cb: (err: any, result: T) => void) => void,
+  params: any,
 ): Promise<T> {
-  const bodyStr = JSON.stringify(body);
-  const headers = generateAuthHeader(endpoint, bodyStr);
-
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method: "POST",
-    headers,
-    body: bodyStr,
+  return new Promise((resolve, reject) => {
+    fn(params, (err: any, result: T) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
   });
-
-  const data = await res.json();
-
-  if (data.status === "failure") {
-    console.error("iyzico error:", data.errorCode, data.errorMessage);
-    throw new Error(data.errorMessage || "iyzico API error");
-  }
-
-  return data;
 }
 
 // ─── Checkout Form (3D Secure) ────────────────────
@@ -114,6 +100,7 @@ export interface CheckoutFormParams {
   teamName: string;
   userEmail: string;
   userName: string;
+  userIp?: string;
   plan: "PRO" | "ENTERPRISE";
   interval: "MONTHLY" | "YEARLY";
   callbackUrl: string;
@@ -122,72 +109,89 @@ export interface CheckoutFormParams {
 export async function createCheckoutForm(params: CheckoutFormParams) {
   const planDef = PLANS[params.plan];
   const priceTL = params.interval === "YEARLY" ? planDef.yearlyPriceTL : planDef.monthlyPriceTL;
-  const priceStr = (priceTL / 100).toFixed(2); // "899.00"
+  const priceStr = (priceTL / 100).toFixed(1); // "899.0" — iyzico format
 
+  // Encode plan+interval in conversationId for callback to parse
   const conversationId = `${params.teamId}__${params.plan}__${params.interval}__${Date.now()}`;
 
-  const body = {
-    locale: "tr",
+  const request = {
+    locale: Iyzipay.LOCALE.TR,
     conversationId,
     price: priceStr,
     paidPrice: priceStr,
-    currency: "TRY",
+    currency: Iyzipay.CURRENCY.TRY,
     basketId: `basket-${params.teamId}`,
-    paymentGroup: "SUBSCRIPTION",
+    paymentGroup: Iyzipay.PAYMENT_GROUP.SUBSCRIPTION,
     callbackUrl: params.callbackUrl,
-    enabledInstallments: [1], // single payment
+    enabledInstallments: [1, 2, 3, 6, 9],
     buyer: {
       id: params.teamId,
       name: params.userName.split(" ")[0] || "User",
       surname: params.userName.split(" ").slice(1).join(" ") || "User",
+      gsmNumber: "+905000000000",
       email: params.userEmail,
-      identityNumber: "11111111111", // Required by iyzico, dummy for now
+      identityNumber: "11111111111",
+      lastLoginDate: new Date().toISOString().replace("T", " ").substring(0, 19),
+      registrationDate: "2020-01-01 12:00:00",
       registrationAddress: "Istanbul, Turkey",
-      ip: "85.34.78.112",
+      ip: params.userIp || "85.34.78.112",
       city: "Istanbul",
       country: "Turkey",
+      zipCode: "34000",
     },
     shippingAddress: {
-      contactName: params.userName,
+      contactName: params.userName || "User",
       city: "Istanbul",
       country: "Turkey",
       address: "Istanbul, Turkey",
+      zipCode: "34000",
     },
     billingAddress: {
-      contactName: params.userName,
+      contactName: params.userName || "User",
       city: "Istanbul",
       country: "Turkey",
       address: "Istanbul, Turkey",
+      zipCode: "34000",
     },
     basketItems: [
       {
         id: `plan-${params.plan.toLowerCase()}-${params.interval.toLowerCase()}`,
         name: `CodeGuard ${planDef.name} (${params.interval === "YEARLY" ? "Yıllık" : "Aylık"})`,
         category1: "SaaS Subscription",
-        itemType: "VIRTUAL",
+        itemType: Iyzipay.BASKET_ITEM_TYPE.VIRTUAL,
         price: priceStr,
       },
     ],
   };
 
-  const result = await iyzicoRequest("/payment/iyzipos/checkoutform/initialize", body);
+  const iyz = getIyzipay();
+  const result: any = await sdkCall(
+    iyz.checkoutFormInitialize.create.bind(iyz.checkoutFormInitialize),
+    request,
+  );
+
+  if (result.status === "failure") {
+    console.error("iyzico error:", result.errorCode, result.errorMessage, result.errorGroup);
+    throw new Error(result.errorMessage || "iyzico API error");
+  }
 
   return {
     token: result.token,
-    checkoutFormContent: result.checkoutFormContent, // HTML snippet to render
+    checkoutFormContent: result.checkoutFormContent,
     conversationId,
   };
 }
 
 // ─── Retrieve Checkout Result ─────────────────────
 export async function retrieveCheckoutResult(token: string) {
-  const result = await iyzicoRequest("/payment/iyzipos/checkoutform/auth/ecom/detail", {
-    locale: "tr",
-    token,
-  });
+  const iyz = getIyzipay();
+  const result: any = await sdkCall(
+    iyz.checkoutForm.retrieve.bind(iyz.checkoutForm),
+    { locale: Iyzipay.LOCALE.TR, token },
+  );
 
   return {
-    status: result.status, // "success" | "failure"
+    status: result.status,
     paymentId: result.paymentId,
     paymentStatus: result.paymentStatus,
     price: result.price,
@@ -202,15 +206,23 @@ export async function retrieveCheckoutResult(token: string) {
 }
 
 // ─── Refund ───────────────────────────────────────
-export async function createRefund(paymentId: string, amountKurus: number) {
-  const priceStr = (amountKurus / 100).toFixed(2);
+export async function createRefund(paymentTransactionId: string, amountKurus: number) {
+  const priceStr = (amountKurus / 100).toFixed(1);
 
-  const result = await iyzicoRequest("/payment/refund", {
-    locale: "tr",
-    paymentTransactionId: paymentId,
-    price: priceStr,
-    currency: "TRY",
-  });
+  const iyz = getIyzipay();
+  const result: any = await sdkCall(
+    iyz.refund.create.bind(iyz.refund),
+    {
+      locale: Iyzipay.LOCALE.TR,
+      paymentTransactionId,
+      price: priceStr,
+      currency: Iyzipay.CURRENCY.TRY,
+    },
+  );
+
+  if (result.status === "failure") {
+    throw new Error(result.errorMessage || "Refund failed");
+  }
 
   return result;
 }
@@ -228,6 +240,6 @@ export function getPlanLimits(plan: PlanKey) {
 // ─── Helper: check if team is within limits ───────
 export function isWithinReviewLimit(plan: PlanKey, reviewsUsed: number): boolean {
   const limits = PLANS[plan];
-  if (limits.reviewsPerMonth === -1) return true; // unlimited
+  if (limits.reviewsPerMonth === -1) return true;
   return reviewsUsed < limits.reviewsPerMonth;
 }

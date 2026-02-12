@@ -95,6 +95,9 @@ export async function POST(req: NextRequest) {
     if (!team) return NextResponse.json({ error: "Team not found" }, { status: 404 });
 
     const origin = req.headers.get("origin") || process.env.NEXTAUTH_URL || "";
+    const userIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("x-real-ip")
+      || "85.34.78.112";
 
     try {
       const result = await createCheckoutForm({
@@ -102,6 +105,7 @@ export async function POST(req: NextRequest) {
         teamName: team.name,
         userEmail: session.user.email || "",
         userName: session.user.name || "User",
+        userIp,
         plan,
         interval: interval || "MONTHLY",
         callbackUrl: `${origin}/api/billing/callback`,
