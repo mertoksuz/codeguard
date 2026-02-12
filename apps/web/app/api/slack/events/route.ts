@@ -20,6 +20,21 @@ async function resolveTeamId(slackTeamId?: string): Promise<string | undefined> 
   }
 }
 
+/** Fallback: resolve teamId from the GitHub repo owner via GitHubInstallation */
+async function resolveTeamIdFromRepo(repoFullName: string): Promise<string | undefined> {
+  try {
+    const owner = repoFullName.split("/")[0];
+    if (!owner) return undefined;
+    const ghInstall = await prisma.gitHubInstallation.findFirst({
+      where: { accountLogin: { equals: owner, mode: "insensitive" } },
+      select: { teamId: true },
+    });
+    return ghInstall?.teamId ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
@@ -52,7 +67,17 @@ export async function POST(req: NextRequest) {
         }
 
         // Resolve the internal teamId from the Slack workspace
-        const teamId = await resolveTeamId(body.team_id);
+        let teamId = await resolveTeamId(body.team_id);
+
+        // Fallback: resolve from the GitHub repo owner
+        if (!teamId) {
+          teamId = await resolveTeamIdFromRepo(repo);
+          if (teamId) {
+            console.log(`[Slack Event] Resolved teamId from repo owner: ${teamId}`);
+          } else {
+            console.warn(`[Slack Event] Could not resolve teamId for Slack team ${body.team_id} or repo ${repo}`);
+          }
+        }
 
         // Use waitUntil to keep function alive after responding to Slack
         waitUntil(

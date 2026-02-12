@@ -314,12 +314,42 @@ async function checkAndIncrementUsage(teamId?: string): Promise<{ allowed: boole
   }
 }
 
+/**
+ * Resolve teamId from repo owner via GitHubInstallation.
+ * Fallback when teamId is not passed from the events route.
+ */
+async function resolveTeamIdFromRepo(repoFullName: string): Promise<string | undefined> {
+  try {
+    const owner = repoFullName.split("/")[0];
+    if (!owner) return undefined;
+    // Try exact match first, then case-insensitive
+    const ghInstall = await prisma.gitHubInstallation.findFirst({
+      where: { accountLogin: owner },
+      select: { teamId: true },
+    });
+    return ghInstall?.teamId ?? undefined;
+  } catch (e: any) {
+    console.warn(`  ⚠️  Could not resolve teamId from repo: ${e.message}`);
+    return undefined;
+  }
+}
+
 // ─── Analysis Worker ───────────────────────────────
 const analysisWorker = new Worker(
   "analysis",
   async (job) => {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = job.data;
-    console.log(`📊 Analyzing ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId: rawTeamId } = job.data;
+
+    // Resolve teamId: use provided teamId, or fallback to repo owner lookup
+    let teamId = rawTeamId;
+    if (!teamId) {
+      teamId = await resolveTeamIdFromRepo(repositoryFullName);
+      if (teamId) {
+        console.log(`📊 Resolved teamId from repo owner: ${teamId}`);
+      }
+    }
+
+    console.log(`📊 Analyzing ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : " (no team)"}...`);
 
     // 0. Check plan limits
     const { allowed, reason } = await checkAndIncrementUsage(teamId);
@@ -354,9 +384,9 @@ const analysisWorker = new Worker(
     const analysisTime = Date.now() - startTime;
     console.log(`  🧠 AI found ${issues.length} issues, score: ${score}/100 (${analysisTime}ms)`);
 
-    // 4. Persist review to DB
-    if (teamId) {
-      try {
+    // 4. Persist review to DB (always try, even without teamId)
+    try {
+      if (teamId) {
         // Upsert repository
         const repository = await prisma.repository.upsert({
           where: { fullName_teamId: { fullName: repositoryFullName, teamId } },
@@ -412,9 +442,11 @@ const analysisWorker = new Worker(
           },
         });
         console.log(`  💾 Review saved to DB (id: ${review.id})`);
-      } catch (e: any) {
-        console.warn(`  ⚠️  Could not save review to DB: ${e.message}`);
+      } else {
+        console.warn(`  ⚠️  No teamId — review not saved to DB. Analysis still sent to Slack.`);
       }
+    } catch (e: any) {
+      console.warn(`  ⚠️  Could not save review to DB: ${e.message}`);
     }
 
     // 5. Send Slack notification
@@ -626,7 +658,14 @@ async function sendFixSlackNotification(
 const fixWorker = new Worker(
   "fix",
   async (job) => {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = job.data;
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId: rawTeamId } = job.data;
+
+    // Resolve teamId: use provided teamId, or fallback to repo owner lookup
+    let teamId = rawTeamId;
+    if (!teamId) {
+      teamId = await resolveTeamIdFromRepo(repositoryFullName);
+    }
+
     console.log(`🔧 Auto-fix started for ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
 
     const [owner, repo] = repositoryFullName.split("/");
