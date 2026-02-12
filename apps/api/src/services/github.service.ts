@@ -1,8 +1,14 @@
 import { Octokit } from "@octokit/rest";
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const fallbackOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-export async function getPullRequestDiff(owner: string, repo: string, prNumber: number) {
+/** Get an Octokit instance — uses provided token or falls back to env var */
+function getOctokit(token?: string): Octokit {
+  return token ? new Octokit({ auth: token }) : fallbackOctokit;
+}
+
+export async function getPullRequestDiff(owner: string, repo: string, prNumber: number, token?: string) {
+  const octokit = getOctokit(token);
   const { data } = await octokit.pulls.get({
     owner, repo, pull_number: prNumber,
     mediaType: { format: "diff" },
@@ -10,12 +16,14 @@ export async function getPullRequestDiff(owner: string, repo: string, prNumber: 
   return data as unknown as string;
 }
 
-export async function getPullRequestFiles(owner: string, repo: string, prNumber: number) {
+export async function getPullRequestFiles(owner: string, repo: string, prNumber: number, token?: string) {
+  const octokit = getOctokit(token);
   const { data } = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber });
   return data;
 }
 
-export async function getFileContent(owner: string, repo: string, path: string, ref: string) {
+export async function getFileContent(owner: string, repo: string, path: string, ref: string, token?: string) {
+  const octokit = getOctokit(token);
   const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
   if ("content" in data) {
     return Buffer.from(data.content, "base64").toString("utf-8");
@@ -26,7 +34,9 @@ export async function getFileContent(owner: string, repo: string, path: string, 
 export async function createFixPullRequest(params: {
   owner: string; repo: string; baseBranch: string; title: string; body: string;
   files: Array<{ path: string; content: string }>;
+  token?: string;
 }) {
+  const octokit = getOctokit(params.token);
   const branchName = `codeguard/fix-${Date.now()}`;
 
   // Get base ref

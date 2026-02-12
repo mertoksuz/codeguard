@@ -16,6 +16,7 @@ export async function queuePRAnalysis(data: {
   prNumber: number;
   slackChannel?: string;
   slackThreadTs?: string;
+  teamId?: string;
 }) {
   await analysisQueue.add("analyze-pr", data, {
     attempts: 3,
@@ -29,6 +30,7 @@ export async function queueFixGeneration(data: {
   slackChannel?: string;
   slackThreadTs?: string;
   requestedBy?: string;
+  teamId?: string;
 }) {
   await fixQueue.add("generate-fix", data, {
     attempts: 2,

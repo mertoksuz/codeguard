@@ -151,6 +151,9 @@ importers:
       '@octokit/rest':
         specifier: ^20.0.0
         version: 20.1.2
+      '@prisma/client':
+        specifier: ^5.10.0
+        version: 5.22.0(prisma@5.22.0)
       '@slack/web-api':
         specifier: ^7.0.0
         version: 7.14.0

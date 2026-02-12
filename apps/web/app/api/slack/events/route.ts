@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
+import { prisma } from "@codeguard/db";
 
 export const maxDuration = 60; // seconds — allows waitUntil to keep running
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "";
+
+/** Look up our internal teamId from the Slack workspace team_id */
+async function resolveTeamId(slackTeamId?: string): Promise<string | undefined> {
+  if (!slackTeamId) return undefined;
+  try {
+    const install = await prisma.slackInstallation.findUnique({
+      where: { teamSlackId: slackTeamId },
+      select: { teamId: true },
+    });
+    return install?.teamId ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -36,6 +51,9 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true });
         }
 
+        // Resolve the internal teamId from the Slack workspace
+        const teamId = await resolveTeamId(body.team_id);
+
         // Use waitUntil to keep function alive after responding to Slack
         waitUntil(
           fetch(`${API_URL}/api/reviews/analyze`, {
@@ -46,6 +64,7 @@ export async function POST(req: NextRequest) {
               prNumber: parseInt(prNumber, 10),
               slackChannel: String(event.channel),
               slackThreadTs: String(event.ts),
+              teamId,
             }),
           })
             .then((res) => console.log(`[Slack Event] API responded: ${res.status}`))

@@ -4,6 +4,9 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { Octokit } from "@octokit/rest";
 import { WebClient } from "@slack/web-api";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
 const needsTls = redisUrl.startsWith("rediss://") || redisUrl.includes("upstash.io");
@@ -15,13 +18,37 @@ const connection = new IORedis(redisUrl, {
 const AI_PROVIDER = process.env.AI_PROVIDER || "openai";
 const openai = AI_PROVIDER === "openai" ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const anthropic = AI_PROVIDER === "claude" ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN || process.env.GITHUB_CLIENT_SECRET });
+
+// Fallback Octokit for single-tenant / backwards compat
+const fallbackOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN || process.env.GITHUB_CLIENT_SECRET });
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+
+/**
+ * Get an authenticated Octokit instance for a team.
+ * Looks up the team's GitHub token from the DB, falls back to env var.
+ */
+async function getOctokitForTeam(teamId?: string): Promise<Octokit> {
+  if (teamId) {
+    try {
+      const install = await prisma.gitHubInstallation.findUnique({
+        where: { teamId },
+        select: { accessToken: true },
+      });
+      if (install?.accessToken) {
+        return new Octokit({ auth: install.accessToken });
+      }
+    } catch (e: any) {
+      console.warn(`  ⚠️  Could not fetch GitHub token for team ${teamId}: ${e.message}`);
+    }
+  }
+  // Fallback to env var (backwards compat)
+  return fallbackOctokit;
+}
 
 const RULES = ["SRP", "OCP", "LSP", "ISP", "DIP", "NAMING", "COMPLEXITY", "FILE_LENGTH", "IMPORTS"];
 
 // ─── Fetch PR diff from GitHub ─────────────────────
-async function getPRDiff(owner: string, repo: string, prNumber: number): Promise<{ diff: string; title: string; url: string }> {
+async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber: number): Promise<{ diff: string; title: string; url: string }> {
   const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
   const { data: diff } = await octokit.pulls.get({
     owner, repo, pull_number: prNumber,
@@ -184,13 +211,14 @@ async function sendSlackResult(
 const analysisWorker = new Worker(
   "analysis",
   async (job) => {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs } = job.data;
-    console.log(`📊 Analyzing ${repositoryFullName}#${prNumber}...`);
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = job.data;
+    console.log(`📊 Analyzing ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
 
     const [owner, repo] = repositoryFullName.split("/");
+    const octokit = await getOctokitForTeam(teamId);
 
     // 1. Fetch PR diff
-    const pr = await getPRDiff(owner, repo, prNumber);
+    const pr = await getPRDiff(octokit, owner, repo, prNumber);
     console.log(`  📄 Fetched diff for "${pr.title}" (${pr.diff.length} chars)`);
 
     // 2. Analyze with AI
@@ -263,13 +291,13 @@ async function generateFixWithAI(fileContent: string, issues: any[]): Promise<st
 }
 
 // ─── Get list of files changed in a PR ─────────────
-async function getPRFiles(owner: string, repo: string, prNumber: number) {
+async function getPRFiles(octokit: Octokit, owner: string, repo: string, prNumber: number) {
   const { data: files } = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber });
   return files.filter(f => f.status !== "removed");
 }
 
 // ─── Get file content from the PR's head branch ────
-async function getFileContent(owner: string, repo: string, ref: string, path: string): Promise<string> {
+async function getFileContent(octokit: Octokit, owner: string, repo: string, ref: string, path: string): Promise<string> {
   try {
     const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
     if ("content" in data && data.encoding === "base64") {
@@ -283,6 +311,7 @@ async function getFileContent(owner: string, repo: string, ref: string, path: st
 
 // ─── Create a fix branch, commit fixed files, open PR ──
 async function createFixPR(
+  octokit: Octokit,
   owner: string,
   repo: string,
   prNumber: number,
@@ -403,10 +432,11 @@ async function sendFixSlackNotification(
 const fixWorker = new Worker(
   "fix",
   async (job) => {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs } = job.data;
-    console.log(`🔧 Auto-fix started for ${repositoryFullName}#${prNumber}...`);
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = job.data;
+    console.log(`🔧 Auto-fix started for ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
 
     const [owner, repo] = repositoryFullName.split("/");
+    const octokit = await getOctokitForTeam(teamId);
 
     // 1. Get PR info (head branch)
     const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
@@ -415,7 +445,7 @@ const fixWorker = new Worker(
     console.log(`  📄 PR: "${pr.title}" (head: ${headBranch}, base: ${baseBranch})`);
 
     // 2. Get the diff to analyze
-    const prDiff = await getPRDiff(owner, repo, prNumber);
+    const prDiff = await getPRDiff(octokit, owner, repo, prNumber);
     console.log(`  📄 Diff: ${prDiff.diff.length} chars`);
 
     // 3. Analyze with AI to find issues
@@ -444,7 +474,7 @@ const fixWorker = new Worker(
     }
 
     // 5. Get changed files and generate fixes
-    const changedFiles = await getPRFiles(owner, repo, prNumber);
+    const changedFiles = await getPRFiles(octokit, owner, repo, prNumber);
     const fixes: { path: string; content: string }[] = [];
 
     for (const file of changedFiles) {
@@ -452,7 +482,7 @@ const fixWorker = new Worker(
       if (!fileIssues || fileIssues.length === 0) continue;
 
       console.log(`  🔧 Fixing ${file.filename} (${fileIssues.length} issues)...`);
-      const content = await getFileContent(owner, repo, headBranch, file.filename);
+      const content = await getFileContent(octokit, owner, repo, headBranch, file.filename);
       if (!content) continue;
 
       const fixedContent = await generateFixWithAI(content, fileIssues);
@@ -476,7 +506,7 @@ const fixWorker = new Worker(
 
     // 6. Create branch, commit fixes, open PR
     console.log(`  📝 Creating fix PR with ${fixes.length} fixed files...`);
-    const fixPR = await createFixPR(owner, repo, prNumber, baseBranch, fixes);
+    const fixPR = await createFixPR(octokit, owner, repo, prNumber, baseBranch, fixes);
     console.log(`  🎉 Fix PR created: ${fixPR.prUrl}`);
 
     // 7. Notify Slack

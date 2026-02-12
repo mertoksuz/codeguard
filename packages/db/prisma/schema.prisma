@@ -210,15 +210,16 @@ model SlackInstallation {
 }
 
 model GitHubInstallation {
-  id             String   @id @default(cuid())
-  installationId Int      @unique
+  id             String    @id @default(cuid())
+  installationId Int?      @unique
   accountLogin   String
-  accountType    String   // "User" | "Organization"
-  accessToken    String?  @db.Text
+  accountType    String    // "User" | "Organization"
+  accessToken    String?   @db.Text
   tokenExpiresAt DateTime?
-  teamId         String   @unique
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  scope          String?   // e.g. "repo,read:user"
+  teamId         String    @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 

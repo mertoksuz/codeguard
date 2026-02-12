@@ -31,12 +31,14 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, account, profile }) {
       // Store GitHub access token on the account record
       if (account && account.provider === "github" && user.id) {
+        const githubLogin = (profile as any)?.login || user.name || "user";
+
         // Auto-create a Team for first-time users
-        const existingMembership = await prisma.teamMember.findFirst({
+        let membership = await prisma.teamMember.findFirst({
           where: { userId: user.id },
         });
 
-        if (!existingMembership) {
+        if (!membership) {
           const teamName = (profile as any)?.login
             ? `${(profile as any).login}'s Team`
             : `${user.name || "My"}'s Team`;
@@ -50,7 +52,7 @@ export const authOptions: NextAuthOptions = {
             slug = `${baseSlug}-${counter}`;
           }
 
-          await prisma.team.create({
+          const team = await prisma.team.create({
             data: {
               name: teamName,
               slug,
@@ -61,6 +63,30 @@ export const authOptions: NextAuthOptions = {
                   role: "OWNER",
                 },
               },
+            },
+          });
+
+          membership = await prisma.teamMember.findFirst({
+            where: { userId: user.id, teamId: team.id },
+          });
+        }
+
+        // Save/update the GitHub token in GitHubInstallation for this team
+        if (membership && account.access_token) {
+          await prisma.gitHubInstallation.upsert({
+            where: { teamId: membership.teamId },
+            create: {
+              teamId: membership.teamId,
+              accountLogin: githubLogin,
+              accountType: (profile as any)?.type === "Organization" ? "Organization" : "User",
+              accessToken: account.access_token,
+              scope: account.scope || null,
+            },
+            update: {
+              accessToken: account.access_token,
+              accountLogin: githubLogin,
+              scope: account.scope || null,
+              updatedAt: new Date(),
             },
           });
         }

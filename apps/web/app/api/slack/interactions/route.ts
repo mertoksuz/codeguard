@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
+import { prisma } from "@codeguard/db";
 
 export const maxDuration = 60;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "";
+
+/** Look up our internal teamId from the Slack workspace team_id */
+async function resolveTeamId(slackTeamId?: string): Promise<string | undefined> {
+  if (!slackTeamId) return undefined;
+  try {
+    const install = await prisma.slackInstallation.findUnique({
+      where: { teamSlackId: slackTeamId },
+      select: { teamId: true },
+    });
+    return install?.teamId ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function POST(req: NextRequest) {
   // Slack sends interaction payloads as application/x-www-form-urlencoded
@@ -26,6 +41,9 @@ export async function POST(req: NextRequest) {
     const threadTs = payload.message?.ts;
     const user = payload.user?.id;
 
+    // Resolve internal teamId from Slack workspace
+    const teamId = await resolveTeamId(payload.team?.id);
+
     if (action.action_id === "auto_fix") {
       const prUrl = action.value; // e.g. "https://github.com/owner/repo/pull/5"
       console.log(`[Slack Interaction] Auto-Fix requested for ${prUrl} by <@${user}>`);
@@ -46,6 +64,7 @@ export async function POST(req: NextRequest) {
               slackChannel: channel,
               slackThreadTs: threadTs,
               requestedBy: user,
+              teamId,
             }),
           })
             .then((res) => console.log(`[Slack Interaction] API auto-fix responded: ${res.status}`))

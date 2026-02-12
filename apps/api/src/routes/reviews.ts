@@ -13,7 +13,7 @@ reviewsRouter.get("/:id", async (req, res) => {
 
 reviewsRouter.post("/analyze", async (req, res) => {
   try {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs } = req.body;
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = req.body;
 
     if (!repositoryFullName || !prNumber) {
       res.status(400).json({ success: false, error: "repositoryFullName and prNumber are required" });
@@ -25,6 +25,7 @@ reviewsRouter.post("/analyze", async (req, res) => {
       prNumber: Number(prNumber),
       slackChannel,
       slackThreadTs,
+      teamId,
     });
 
     res.json({ success: true, data: { message: `Analysis queued for ${repositoryFullName}#${prNumber}` } });
@@ -36,7 +37,7 @@ reviewsRouter.post("/analyze", async (req, res) => {
 
 reviewsRouter.post("/auto-fix", async (req, res) => {
   try {
-    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, requestedBy } = req.body;
+    const { repositoryFullName, prNumber, slackChannel, slackThreadTs, requestedBy, teamId } = req.body;
 
     if (!repositoryFullName || !prNumber) {
       res.status(400).json({ success: false, error: "repositoryFullName and prNumber are required" });
@@ -49,6 +50,7 @@ reviewsRouter.post("/auto-fix", async (req, res) => {
       slackChannel,
       slackThreadTs,
       requestedBy,
+      teamId,
     });
 
     res.json({ success: true, data: { message: `Auto-fix queued for ${repositoryFullName}#${prNumber}` } });
