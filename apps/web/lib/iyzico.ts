@@ -110,9 +110,23 @@ function generateAuthHeaderV2(uri: string, body: Record<string, any>): Record<st
 }
 
 async function iyzicoRequest<T = any>(endpoint: string, body: Record<string, any>): Promise<T> {
+  const apiKey = API_KEY();
+  const secretKey = SECRET_KEY();
+  const baseUrl = BASE_URL();
+
+  // Debug: log credential presence (not values) to help diagnose auth issues
+  console.log("[iyzico] request to:", baseUrl + endpoint);
+  console.log("[iyzico] API_KEY set:", !!apiKey, "length:", apiKey.length);
+  console.log("[iyzico] SECRET_KEY set:", !!secretKey, "length:", secretKey.length);
+  console.log("[iyzico] BASE_URL:", baseUrl);
+
+  if (!apiKey || !secretKey) {
+    throw new Error("iyzico API credentials not configured (IYZICO_API_KEY / IYZICO_SECRET_KEY)");
+  }
+
   const headers = generateAuthHeaderV2(endpoint, body);
 
-  const res = await fetch(`${BASE_URL()}${endpoint}`, {
+  const res = await fetch(`${baseUrl}${endpoint}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -121,7 +135,12 @@ async function iyzicoRequest<T = any>(endpoint: string, body: Record<string, any
   const data = await res.json();
 
   if (data.status === "failure") {
-    console.error("iyzico error:", data.errorCode, data.errorMessage, data.errorGroup);
+    console.error("iyzico error:", JSON.stringify({
+      errorCode: data.errorCode,
+      errorMessage: data.errorMessage,
+      errorGroup: data.errorGroup,
+      conversationId: data.conversationId,
+    }));
     throw new Error(data.errorMessage || "iyzico API error");
   }
 
