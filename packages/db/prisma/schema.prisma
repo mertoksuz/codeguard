@@ -80,6 +80,7 @@ model Team {
   repositories  Repository[]
   reviews       Review[]
   ruleConfigs   RuleConfig[]
+  customRules   CustomRule[]
   subscription  Subscription?
   slackInstall  SlackInstallation?
   githubInstall GitHubInstallation?
@@ -190,6 +191,24 @@ model RuleConfig {
 
   @@unique([ruleId, teamId])
   @@map("rule_configs")
+}
+
+model CustomRule {
+  id          String   @id @default(cuid())
+  name        String                     // e.g. "PSR-12 Compliance"
+  slug        String                     // e.g. "psr-12"
+  description String?  @db.Text          // Short description
+  prompt      String   @db.Text          // The AI prompt for this rule
+  severity    Severity @default(WARNING)
+  enabled     Boolean  @default(true)
+  teamId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([slug, teamId])
+  @@map("custom_rules")
 }
 
 // ─── Integrations ──────────────────────────────────

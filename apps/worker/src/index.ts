@@ -66,7 +66,34 @@ async function getSlackForTeam(teamId?: string): Promise<WebClient> {
   return fallbackSlack;
 }
 
-const RULES = ["SRP", "OCP", "LSP", "ISP", "DIP", "NAMING", "COMPLEXITY", "FILE_LENGTH", "IMPORTS"];
+const ALL_BUILTIN_RULES = ["SRP", "OCP", "LSP", "ISP", "DIP", "NAMING", "COMPLEXITY", "FILE_LENGTH", "IMPORTS"];
+
+/**
+ * Get the enabled rules for a team (built-in + custom).
+ * Returns { builtinRules: string[], customPrompts: string[] }
+ */
+async function getTeamRules(teamId?: string): Promise<{ builtinRules: string[]; customPrompts: string[] }> {
+  if (!teamId) return { builtinRules: ALL_BUILTIN_RULES, customPrompts: [] };
+
+  try {
+    const [ruleConfigs, customRules] = await Promise.all([
+      prisma.ruleConfig.findMany({ where: { teamId } }),
+      prisma.customRule.findMany({ where: { teamId, enabled: true } }),
+    ]);
+
+    // Determine enabled built-in rules (all enabled by default, unless explicitly disabled)
+    const disabledSet = new Set(ruleConfigs.filter((c) => !c.enabled).map((c) => c.ruleId));
+    const builtinRules = ALL_BUILTIN_RULES.filter((r) => !disabledSet.has(r));
+
+    // Custom rule prompts
+    const customPrompts = customRules.map((r) => `[${r.name}] (severity: ${r.severity}): ${r.prompt}`);
+
+    return { builtinRules, customPrompts };
+  } catch (e: any) {
+    console.warn(`  ⚠️  Could not fetch rules for team ${teamId}: ${e.message}`);
+    return { builtinRules: ALL_BUILTIN_RULES, customPrompts: [] };
+  }
+}
 
 // ─── Fetch PR diff from GitHub ─────────────────────
 async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber: number): Promise<{ diff: string; title: string; url: string }> {
@@ -83,12 +110,19 @@ async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber
 }
 
 // ─── Analyze diff with AI (OpenAI or Claude) ──────
-const ANALYSIS_SYSTEM_PROMPT = (rules: string[]) =>
-  `You are an expert code reviewer. Analyze the following PR diff for violations of these SOLID and clean-code rules: ${rules.join(", ")}.
-Return JSON: { "issues": [{ "ruleId": string, "ruleName": string, "severity": "error"|"warning"|"info", "file": string, "line": number, "message": string, "suggestion": string }], "score": number }
-score is 0-100 (100 = perfect). Only return the JSON, no other text.`;
+const ANALYSIS_SYSTEM_PROMPT = (rules: string[], customPrompts: string[]) => {
+  let prompt = `You are an expert code reviewer. Analyze the following PR diff for violations of these SOLID and clean-code rules: ${rules.join(", ")}.`;
 
-async function analyzeWithAI(diff: string, rules: string[]) {
+  if (customPrompts.length > 0) {
+    prompt += `\n\nAlso check for violations of these custom rules:\n${customPrompts.join("\n")}`;
+  }
+
+  prompt += `\nReturn JSON: { "issues": [{ "ruleId": string, "ruleName": string, "severity": "error"|"warning"|"info", "file": string, "line": number, "message": string, "suggestion": string }], "score": number }
+score is 0-100 (100 = perfect). Only return the JSON, no other text.`;
+  return prompt;
+};
+
+async function analyzeWithAI(diff: string, rules: string[], customPrompts: string[] = []) {
   const truncatedDiff = diff.substring(0, 12000);
   let content = '{"issues":[],"score":100}';
 
@@ -97,7 +131,7 @@ async function analyzeWithAI(diff: string, rules: string[]) {
     const response = await anthropic.messages.create({
       model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
       max_tokens: 4000,
-      system: ANALYSIS_SYSTEM_PROMPT(rules),
+      system: ANALYSIS_SYSTEM_PROMPT(rules, customPrompts),
       messages: [{ role: "user", content: truncatedDiff }],
     });
     const block = response.content[0];
@@ -108,7 +142,7 @@ async function analyzeWithAI(diff: string, rules: string[]) {
     const response = await oa.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4o",
       messages: [
-        { role: "system", content: ANALYSIS_SYSTEM_PROMPT(rules) },
+        { role: "system", content: ANALYSIS_SYSTEM_PROMPT(rules, customPrompts) },
         { role: "user", content: truncatedDiff },
       ],
       temperature: 0.1,
@@ -238,16 +272,85 @@ const analysisWorker = new Worker(
 
     const [owner, repo] = repositoryFullName.split("/");
     const octokit = await getOctokitForTeam(teamId);
+    const startTime = Date.now();
 
     // 1. Fetch PR diff
     const pr = await getPRDiff(octokit, owner, repo, prNumber);
     console.log(`  📄 Fetched diff for "${pr.title}" (${pr.diff.length} chars)`);
 
-    // 2. Analyze with AI
-    const { issues, score } = await analyzeWithAI(pr.diff, RULES);
-    console.log(`  🧠 AI found ${issues.length} issues, score: ${score}/100`);
+    // 2. Get team rules
+    const { builtinRules, customPrompts } = await getTeamRules(teamId);
+    console.log(`  📏 Rules: ${builtinRules.length} built-in + ${customPrompts.length} custom`);
 
-    // 3. Send Slack notification
+    // 3. Analyze with AI
+    const { issues, score } = await analyzeWithAI(pr.diff, builtinRules, customPrompts);
+    const analysisTime = Date.now() - startTime;
+    console.log(`  🧠 AI found ${issues.length} issues, score: ${score}/100 (${analysisTime}ms)`);
+
+    // 4. Persist review to DB
+    if (teamId) {
+      try {
+        // Upsert repository
+        const repository = await prisma.repository.upsert({
+          where: { fullName_teamId: { fullName: repositoryFullName, teamId } },
+          create: {
+            name: repo,
+            fullName: repositoryFullName,
+            owner,
+            url: `https://github.com/${repositoryFullName}`,
+            teamId,
+          },
+          update: { updatedAt: new Date() },
+        });
+
+        const criticalCount = issues.filter((i: any) => i.severity === "error").length;
+        const warningCount = issues.filter((i: any) => i.severity === "warning").length;
+        const infoCount = issues.filter((i: any) => i.severity === "info").length;
+
+        // Determine head branch from diff (fallback)
+        const branch = pr.url.split("/").pop() || "unknown";
+
+        const review = await prisma.review.create({
+          data: {
+            prNumber,
+            prTitle: pr.title,
+            prUrl: pr.url,
+            branch,
+            status: "COMPLETED",
+            score,
+            totalIssues: issues.length,
+            criticalCount,
+            warningCount,
+            infoCount,
+            analysisTime,
+            repositoryId: repository.id,
+            teamId,
+            slackTs: slackThreadTs || null,
+            slackChannel: slackChannel || null,
+            issues: {
+              create: issues.map((i: any) => ({
+                ruleId: i.ruleId || "UNKNOWN",
+                ruleName: i.ruleName || "Unknown",
+                severity: (i.severity || "warning").toUpperCase() === "ERROR"
+                  ? "ERROR"
+                  : (i.severity || "warning").toUpperCase() === "INFO"
+                  ? "INFO"
+                  : "WARNING",
+                file: i.file || "unknown",
+                line: i.line || 0,
+                message: i.message || "",
+                suggestion: i.suggestion || null,
+              })),
+            },
+          },
+        });
+        console.log(`  💾 Review saved to DB (id: ${review.id})`);
+      } catch (e: any) {
+        console.warn(`  ⚠️  Could not save review to DB: ${e.message}`);
+      }
+    }
+
+    // 5. Send Slack notification
     if (slackChannel) {
       const slackClient = await getSlackForTeam(teamId);
       await sendSlackResult(slackClient, slackChannel, slackThreadTs, {
@@ -473,8 +576,9 @@ const fixWorker = new Worker(
     const prDiff = await getPRDiff(octokit, owner, repo, prNumber);
     console.log(`  📄 Diff: ${prDiff.diff.length} chars`);
 
-    // 3. Analyze with AI to find issues
-    const { issues } = await analyzeWithAI(prDiff.diff, RULES);
+    // 3. Analyze with AI to find issues (using team rules)
+    const { builtinRules, customPrompts } = await getTeamRules(teamId);
+    const { issues } = await analyzeWithAI(prDiff.diff, builtinRules, customPrompts);
     console.log(`  🧠 Found ${issues.length} issues to fix`);
 
     if (issues.length === 0) {
@@ -534,7 +638,20 @@ const fixWorker = new Worker(
     const fixPR = await createFixPR(octokit, owner, repo, prNumber, baseBranch, fixes);
     console.log(`  🎉 Fix PR created: ${fixPR.prUrl}`);
 
-    // 7. Notify Slack
+    // 7. Update review record in DB with fix info
+    if (teamId) {
+      try {
+        await prisma.review.updateMany({
+          where: { teamId, prNumber, repository: { fullName: repositoryFullName } },
+          data: { status: "FIXED", fixPrUrl: fixPR.prUrl, fixPrNumber: fixPR.prNumber },
+        });
+        console.log(`  💾 Review updated with fix PR`);
+      } catch (e: any) {
+        console.warn(`  ⚠️  Could not update review in DB: ${e.message}`);
+      }
+    }
+
+    // 8. Notify Slack
     if (slackChannel) {
       await sendFixSlackNotification(slackClient, slackChannel, slackThreadTs, {
         originalPrNumber: prNumber,

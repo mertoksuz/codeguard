@@ -2,29 +2,63 @@ export const dynamic = "force-dynamic";
 
 import { Card, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-
-const stats = [
-  { label: "Total Reviews", value: "127", change: "+12%", icon: "🔍" },
-  { label: "Issues Found", value: "843", change: "+8%", icon: "⚠️" },
-  { label: "Issues Fixed", value: "721", change: "+15%", icon: "✅" },
-  { label: "Avg. Score", value: "82", change: "+5pt", icon: "📊" },
-];
-
-const recentReviews = [
-  { id: 1, repo: "acme/api", pr: "#142", title: "Add payment processing", status: "ANALYZED", issues: 3, score: 78 },
-  { id: 2, repo: "acme/web", pr: "#89", title: "Refactor auth module", status: "FIXED", issues: 5, score: 92 },
-  { id: 3, repo: "acme/api", pr: "#140", title: "User service updates", status: "ANALYZING", issues: 0, score: null },
-  { id: 4, repo: "acme/mobile", pr: "#45", title: "Cart optimization", status: "ANALYZED", issues: 2, score: 85 },
-];
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@codeguard/db";
+import { redirect } from "next/navigation";
 
 const statusColor: Record<string, "brand" | "success" | "warning" | "info"> = {
   PENDING: "info",
   ANALYZING: "brand",
-  ANALYZED: "warning",
+  COMPLETED: "warning",
+  FIXING: "brand",
   FIXED: "success",
+  FAILED: "info",
 };
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/auth/login");
+
+  const teamId = (session.user as any).teamId;
+
+  // Fetch real stats
+  const [totalReviews, totalIssues, fixedReviews, avgScoreResult, recentReviews] = await Promise.all([
+    teamId ? prisma.review.count({ where: { teamId } }) : 0,
+    teamId
+      ? prisma.issue.count({
+          where: { review: { teamId } },
+        })
+      : 0,
+    teamId ? prisma.review.count({ where: { teamId, status: "FIXED" } }) : 0,
+    teamId
+      ? prisma.review.aggregate({
+          where: { teamId, score: { gt: 0 } },
+          _avg: { score: true },
+        })
+      : { _avg: { score: null } },
+    teamId
+      ? prisma.review.findMany({
+          where: { teamId },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          include: {
+            repository: { select: { fullName: true } },
+            _count: { select: { issues: true } },
+          },
+        })
+      : [],
+  ]);
+
+  const avgScore = Math.round(avgScoreResult._avg?.score || 0);
+
+  const stats = [
+    { label: "Total Reviews", value: totalReviews.toString(), icon: "🔍" },
+    { label: "Issues Found", value: totalIssues.toString(), icon: "⚠️" },
+    { label: "PRs Fixed", value: fixedReviews.toString(), icon: "✅" },
+    { label: "Avg. Score", value: avgScore > 0 ? avgScore.toString() : "—", icon: "📊" },
+  ];
+
   return (
     <div>
       <div className="mb-8">
@@ -42,7 +76,6 @@ export default function DashboardPage() {
                 <div className="text-sm text-surface-500">{s.label}</div>
                 <div className="flex items-baseline gap-2">
                   <span className="text-2xl font-extrabold text-surface-900">{s.value}</span>
-                  <span className="text-xs font-medium text-green-600">{s.change}</span>
                 </div>
               </div>
             </CardContent>
@@ -55,27 +88,43 @@ export default function DashboardPage() {
         <div className="p-6 pb-4 border-b border-surface-100">
           <h2 className="text-lg font-bold text-surface-900">Recent Reviews</h2>
         </div>
-        <div className="divide-y divide-surface-100">
-          {recentReviews.map((r) => (
-            <div key={r.id} className="px-6 py-4 flex items-center justify-between hover:bg-surface-50 transition-colors">
-              <div className="flex items-center gap-4 min-w-0">
-                <div>
-                  <div className="font-medium text-sm text-surface-900">{r.title}</div>
-                  <div className="text-xs text-surface-400 mt-0.5">{r.repo} {r.pr}</div>
+        {recentReviews.length === 0 ? (
+          <div className="p-8 text-center text-surface-400">
+            <div className="text-4xl mb-3">🔍</div>
+            <p className="font-medium">No reviews yet</p>
+            <p className="text-sm mt-1">Share a PR link in Slack to trigger your first analysis</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-surface-100">
+            {recentReviews.map((r) => (
+              <div key={r.id} className="px-6 py-4 flex items-center justify-between hover:bg-surface-50 transition-colors">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div>
+                    <div className="font-medium text-sm text-surface-900">{r.prTitle}</div>
+                    <div className="text-xs text-surface-400 mt-0.5">
+                      {r.repository.fullName} #{r.prNumber}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 shrink-0">
+                  {r._count.issues > 0 && (
+                    <span className="text-sm text-surface-500">{r._count.issues} issues</span>
+                  )}
+                  {r.score > 0 && (
+                    <span
+                      className={`text-sm font-bold ${
+                        r.score >= 80 ? "text-green-600" : r.score >= 60 ? "text-amber-600" : "text-red-600"
+                      }`}
+                    >
+                      {r.score}/100
+                    </span>
+                  )}
+                  <Badge variant={statusColor[r.status] || "default"}>{r.status}</Badge>
                 </div>
               </div>
-              <div className="flex items-center gap-4 shrink-0">
-                {r.issues > 0 && <span className="text-sm text-surface-500">{r.issues} issues</span>}
-                {r.score && (
-                  <span className={`text-sm font-bold ${r.score >= 80 ? "text-green-600" : r.score >= 60 ? "text-amber-600" : "text-red-600"}`}>
-                    {r.score}/100
-                  </span>
-                )}
-                <Badge variant={statusColor[r.status] || "default"}>{r.status}</Badge>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );
