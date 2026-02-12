@@ -62,7 +62,7 @@ export async function GET(
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a2e; background: #f8f9fa; padding: 40px 20px; }
     .invoice { max-width: 800px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); overflow: hidden; }
-    .header { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 40px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .header { background: linear-gradient(135deg, #2563eb, #06b6d4); color: white; padding: 40px; display: flex; justify-content: space-between; align-items: flex-start; }
     .header-left h1 { font-size: 28px; font-weight: 800; margin-bottom: 4px; }
     .header-left p { opacity: 0.85; font-size: 14px; }
     .header-right { text-align: right; font-size: 14px; }
@@ -83,11 +83,11 @@ export async function GET(
     .status-failed { background: #fef2f2; color: #991b1b; }
     .status-pending { background: #fef9c3; color: #854d0e; }
     .footer { padding: 24px 40px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #9ca3af; }
-    .footer a { color: #6366f1; text-decoration: none; }
+    .footer a { color: #2563eb; text-decoration: none; }
     .no-print { margin: 24px auto; max-width: 800px; display: flex; gap: 12px; justify-content: center; }
     .btn { padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
-    .btn-primary { background: #6366f1; color: white; }
-    .btn-primary:hover { background: #4f46e5; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
     .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
     .btn-secondary:hover { background: #f3f4f6; }
     @media print {

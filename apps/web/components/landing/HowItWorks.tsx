@@ -3,10 +3,10 @@
 import { motion } from "framer-motion";
 
 const steps = [
-  { num: "01", title: "Connect", desc: "Install the CodeGuard Slack app and connect your GitHub organization. Takes under 2 minutes.", color: "from-brand-500 to-brand-600" },
-  { num: "02", title: "Share", desc: "Share a PR link in any Slack channel, or let CodeGuard auto-detect new PRs via webhooks.", color: "from-blue-500 to-cyan-500" },
-  { num: "03", title: "Analyze", desc: "AI scans every file in the PR against SOLID principles, clean code rules, and your custom config.", color: "from-violet-500 to-purple-500" },
-  { num: "04", title: "Fix", desc: "Review the analysis, click Auto-Fix, and a clean PR with all fixes is created automatically.", color: "from-accent-500 to-orange-500" },
+  { num: "01", title: "Connect", desc: "Install the CodeGuard Slack app and connect your GitHub organization. Takes under 2 minutes.", color: "from-brand-700 to-brand-500" },
+  { num: "02", title: "Share", desc: "Share a PR link in any Slack channel, or let CodeGuard auto-detect new PRs via webhooks.", color: "from-brand-500 to-brand-400" },
+  { num: "03", title: "Analyze", desc: "AI scans every file in the PR against SOLID principles, clean code rules, and your custom config.", color: "from-brand-400 to-accent-500" },
+  { num: "04", title: "Fix", desc: "Review the analysis, click Auto-Fix, and a clean PR with all fixes is created automatically.", color: "from-accent-500 to-accent-400" },
 ];
 
 export function HowItWorks() {

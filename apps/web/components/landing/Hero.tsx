@@ -98,15 +98,15 @@ export function Hero() {
                 <div className="p-6 space-y-5">
                   {/* User message */}
                   <div className="flex gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">M</div>
+                    <div className="w-9 h-9 rounded-lg bg-brand-100 flex items-center justify-center text-brand-600 font-bold text-sm shrink-0">M</div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm">Mert</span>
                         <span className="text-xs text-surface-400">11:23 AM</span>
                       </div>
                       <p className="text-sm text-surface-600 mt-1">
-                        <span className="text-blue-500">@CodeGuard</span> review{" "}
-                        <span className="text-blue-500 underline">github.com/acme/api/pull/142</span>
+                        <span className="text-brand-500">@CodeGuard</span> review{" "}
+                        <span className="text-brand-500 underline">github.com/acme/api/pull/142</span>
                       </p>
                     </div>
                   </div>
