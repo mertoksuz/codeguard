@@ -2,8 +2,11 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 
 export function Hero() {
+  const { status } = useSession();
+  const isLoggedIn = status === "authenticated";
   return (
     <section className="relative min-h-screen flex items-center overflow-hidden">
       {/* Background */}
@@ -39,10 +42,10 @@ export function Hero() {
 
             <div className="mt-10 flex flex-wrap gap-4">
               <Link
-                href="/auth/register"
+                href={isLoggedIn ? "/dashboard" : "/auth/register"}
                 className="inline-flex items-center gap-2 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white font-semibold px-8 py-4 rounded-2xl text-lg shadow-xl shadow-brand-500/25 hover:shadow-brand-500/40 transition-all"
               >
-                Start Free Trial
+                {isLoggedIn ? "Go to Dashboard" : "Start Free Trial"}
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                 </svg>

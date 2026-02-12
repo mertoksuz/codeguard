@@ -3,10 +3,13 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useSession } from "next-auth/react";
 
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { data: session, status } = useSession();
+  const isLoggedIn = status === "authenticated";
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -56,18 +59,38 @@ export function Navbar() {
 
         {/* CTA */}
         <div className="hidden md:flex items-center gap-3">
-          <Link
-            href="/auth/login"
-            className="text-sm font-medium text-surface-600 hover:text-brand-500 transition-colors px-4 py-2"
-          >
-            Log in
-          </Link>
-          <Link
-            href="/auth/register"
-            className="text-sm font-semibold text-white bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40"
-          >
-            Start Free Trial
-          </Link>
+          {isLoggedIn ? (
+            <>
+              {session?.user?.image && (
+                <img
+                  src={session.user.image}
+                  alt=""
+                  className="w-8 h-8 rounded-full border-2 border-brand-200"
+                />
+              )}
+              <Link
+                href="/dashboard"
+                className="text-sm font-semibold text-white bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40"
+              >
+                Dashboard
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/auth/login"
+                className="text-sm font-medium text-surface-600 hover:text-brand-500 transition-colors px-4 py-2"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/auth/register"
+                className="text-sm font-semibold text-white bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40"
+              >
+                Start Free Trial
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -94,8 +117,14 @@ export function Navbar() {
             </a>
           ))}
           <div className="pt-3 border-t border-surface-200 flex gap-3">
-            <Link href="/auth/login" className="flex-1 text-center text-sm font-medium text-surface-600 py-2.5 rounded-xl border border-surface-200">Log in</Link>
-            <Link href="/auth/register" className="flex-1 text-center text-sm font-semibold text-white bg-brand-500 py-2.5 rounded-xl">Start Free</Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard" className="flex-1 text-center text-sm font-semibold text-white bg-brand-500 py-2.5 rounded-xl">Dashboard</Link>
+            ) : (
+              <>
+                <Link href="/auth/login" className="flex-1 text-center text-sm font-medium text-surface-600 py-2.5 rounded-xl border border-surface-200">Log in</Link>
+                <Link href="/auth/register" className="flex-1 text-center text-sm font-semibold text-white bg-brand-500 py-2.5 rounded-xl">Start Free</Link>
+              </>
+            )}
           </div>
         </div>
       )}
