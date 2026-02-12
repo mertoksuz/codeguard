@@ -74,8 +74,7 @@ export default async function ReviewsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <Link
-                      href={r.prUrl}
-                      target="_blank"
+                      href={`/dashboard/reviews/${r.id}`}
                       className="font-semibold text-surface-900 hover:text-brand-600 transition-colors"
                     >
                       {r.prTitle}
@@ -137,9 +136,12 @@ export default async function ReviewsPage() {
                       </div>
                     ))}
                     {r._count.issues > 5 && (
-                      <div className="text-xs text-surface-400 pt-1">
-                        +{r._count.issues - 5} more issues
-                      </div>
+                      <Link
+                        href={`/dashboard/reviews/${r.id}`}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium pt-1 inline-block"
+                      >
+                        +{r._count.issues - 5} more issues →
+                      </Link>
                     )}
                   </div>
                 )}
