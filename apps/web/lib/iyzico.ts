@@ -1,26 +1,16 @@
 /**
- * iyzico Payment Integration — using official iyzipay SDK
+ * iyzico Payment Integration — serverless-compatible (no fs dependency)
  * Docs: https://dev.iyzipay.com/en
  *
- * Uses iyzico's checkout form (3D Secure) for PCI compliance.
+ * Uses iyzico V2 auth (HMAC-SHA256) and checkout form for PCI compliance.
  * All amounts are in kuruş (TL cents): 1 TL = 100 kuruş
  */
 
-// @ts-expect-error — iyzipay has no type declarations
-import Iyzipay from "iyzipay";
+import crypto from "crypto";
 
-// Lazy-init to avoid crashing during Next.js build (no env vars at build time)
-let _iyzipay: any = null;
-function getIyzipay() {
-  if (!_iyzipay) {
-    _iyzipay = new Iyzipay({
-      apiKey: process.env.IYZICO_API_KEY || "",
-      secretKey: process.env.IYZICO_SECRET_KEY || "",
-      uri: process.env.IYZICO_BASE_URL || "https://sandbox-api.iyzipay.com",
-    });
-  }
-  return _iyzipay;
-}
+const API_KEY = () => process.env.IYZICO_API_KEY || "";
+const SECRET_KEY = () => process.env.IYZICO_SECRET_KEY || "";
+const BASE_URL = () => process.env.IYZICO_BASE_URL || "https://sandbox-api.iyzipay.com";
 
 // ─── Plan Definitions ─────────────────────────────
 export const PLANS = {
@@ -81,17 +71,61 @@ export const PLANS = {
 
 export type PlanKey = keyof typeof PLANS;
 
-// ─── Helper: promisify SDK callbacks ──────────────
-function sdkCall<T = any>(
-  fn: (params: any, cb: (err: any, result: T) => void) => void,
-  params: any,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    fn(params, (err: any, result: T) => {
-      if (err) return reject(err);
-      resolve(result);
-    });
+// ─── iyzico V2 Auth (HMAC-SHA256) ─────────────────
+// Extracted from official iyzipay SDK utils.js — works without fs
+function generateRandomString(): string {
+  return process.hrtime.bigint().toString() + Math.random().toString(8).slice(2);
+}
+
+function formatPrice(price: number | string): string {
+  const p = parseFloat(String(price));
+  if (!isFinite(p)) return String(price);
+  const result = p.toString();
+  return result.includes(".") ? result : result + ".0";
+}
+
+function generateAuthHeaderV2(uri: string, body: Record<string, any>): Record<string, string> {
+  const apiKey = API_KEY();
+  const secretKey = SECRET_KEY();
+  const randomString = generateRandomString();
+
+  const signature = crypto
+    .createHmac("sha256", secretKey)
+    .update(randomString + uri + JSON.stringify(body))
+    .digest("hex");
+
+  const authorizationParams = [
+    `apiKey:${apiKey}`,
+    `randomKey:${randomString}`,
+    `signature:${signature}`,
+  ];
+  const authValue = Buffer.from(authorizationParams.join("&")).toString("base64");
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `IYZWSv2 ${authValue}`,
+    "x-iyzi-rnd": randomString,
+    "x-iyzi-client-version": "iyzipay-node-2.0.65",
+  };
+}
+
+async function iyzicoRequest<T = any>(endpoint: string, body: Record<string, any>): Promise<T> {
+  const headers = generateAuthHeaderV2(endpoint, body);
+
+  const res = await fetch(`${BASE_URL()}${endpoint}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
   });
+
+  const data = await res.json();
+
+  if (data.status === "failure") {
+    console.error("iyzico error:", data.errorCode, data.errorMessage, data.errorGroup);
+    throw new Error(data.errorMessage || "iyzico API error");
+  }
+
+  return data as T;
 }
 
 // ─── Checkout Form (3D Secure) ────────────────────
@@ -109,19 +143,19 @@ export interface CheckoutFormParams {
 export async function createCheckoutForm(params: CheckoutFormParams) {
   const planDef = PLANS[params.plan];
   const priceTL = params.interval === "YEARLY" ? planDef.yearlyPriceTL : planDef.monthlyPriceTL;
-  const priceStr = (priceTL / 100).toFixed(1); // "899.0" — iyzico format
+  const priceStr = formatPrice(priceTL / 100); // "899.0"
 
   // Encode plan+interval in conversationId for callback to parse
   const conversationId = `${params.teamId}__${params.plan}__${params.interval}__${Date.now()}`;
 
-  const request = {
-    locale: Iyzipay.LOCALE.TR,
+  const body = {
+    locale: "tr",
     conversationId,
     price: priceStr,
     paidPrice: priceStr,
-    currency: Iyzipay.CURRENCY.TRY,
+    currency: "TRY",
     basketId: `basket-${params.teamId}`,
-    paymentGroup: Iyzipay.PAYMENT_GROUP.SUBSCRIPTION,
+    paymentGroup: "SUBSCRIPTION",
     callbackUrl: params.callbackUrl,
     enabledInstallments: [1, 2, 3, 6, 9],
     buyer: {
@@ -158,22 +192,13 @@ export async function createCheckoutForm(params: CheckoutFormParams) {
         id: `plan-${params.plan.toLowerCase()}-${params.interval.toLowerCase()}`,
         name: `CodeGuard ${planDef.name} (${params.interval === "YEARLY" ? "Yıllık" : "Aylık"})`,
         category1: "SaaS Subscription",
-        itemType: Iyzipay.BASKET_ITEM_TYPE.VIRTUAL,
+        itemType: "VIRTUAL",
         price: priceStr,
       },
     ],
   };
 
-  const iyz = getIyzipay();
-  const result: any = await sdkCall(
-    iyz.checkoutFormInitialize.create.bind(iyz.checkoutFormInitialize),
-    request,
-  );
-
-  if (result.status === "failure") {
-    console.error("iyzico error:", result.errorCode, result.errorMessage, result.errorGroup);
-    throw new Error(result.errorMessage || "iyzico API error");
-  }
+  const result = await iyzicoRequest("/payment/iyzipos/checkoutform/initialize/auth/ecom", body);
 
   return {
     token: result.token,
@@ -184,11 +209,10 @@ export async function createCheckoutForm(params: CheckoutFormParams) {
 
 // ─── Retrieve Checkout Result ─────────────────────
 export async function retrieveCheckoutResult(token: string) {
-  const iyz = getIyzipay();
-  const result: any = await sdkCall(
-    iyz.checkoutForm.retrieve.bind(iyz.checkoutForm),
-    { locale: Iyzipay.LOCALE.TR, token },
-  );
+  const result = await iyzicoRequest("/payment/iyzipos/checkoutform/auth/ecom/detail", {
+    locale: "tr",
+    token,
+  });
 
   return {
     status: result.status,
@@ -207,22 +231,14 @@ export async function retrieveCheckoutResult(token: string) {
 
 // ─── Refund ───────────────────────────────────────
 export async function createRefund(paymentTransactionId: string, amountKurus: number) {
-  const priceStr = (amountKurus / 100).toFixed(1);
+  const priceStr = formatPrice(amountKurus / 100);
 
-  const iyz = getIyzipay();
-  const result: any = await sdkCall(
-    iyz.refund.create.bind(iyz.refund),
-    {
-      locale: Iyzipay.LOCALE.TR,
-      paymentTransactionId,
-      price: priceStr,
-      currency: Iyzipay.CURRENCY.TRY,
-    },
-  );
-
-  if (result.status === "failure") {
-    throw new Error(result.errorMessage || "Refund failed");
-  }
+  const result = await iyzicoRequest("/payment/refund", {
+    locale: "tr",
+    paymentTransactionId,
+    price: priceStr,
+    currency: "TRY",
+  });
 
   return result;
 }
