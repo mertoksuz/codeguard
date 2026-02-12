@@ -15,6 +15,7 @@ const plans = [
     features: ["50 reviews/month", "5 SOLID rules", "Slack integration", "Basic dashboard", "1 repository"],
     cta: "Start Free",
     ctaHref: "/auth/register",
+    planKey: "FREE",
     popular: false,
   },
   {
@@ -24,9 +25,10 @@ const plans = [
     yearlyPrice: "₺719",
     monthlyRaw: 899,
     yearlyRaw: 719,
-    features: ["500 reviews/month", "All 9+ rules", "Auto-fix PRs", "Advanced dashboard", "Unlimited repos", "Custom rule config", "Priority support"],
-    cta: "Start Pro Trial",
+    features: ["500 reviews/month", "All 9+ rules", "Auto-fix PRs", "Advanced dashboard", "Unlimited repos", "20 custom rules", "Priority support"],
+    cta: "Upgrade to Pro",
     ctaHref: "/dashboard/settings",
+    planKey: "PRO",
     popular: true,
   },
   {
@@ -37,8 +39,9 @@ const plans = [
     monthlyRaw: 3499,
     yearlyRaw: 2799,
     features: ["Unlimited reviews", "Custom rules engine", "SSO & SAML", "Dedicated support", "SLA guarantee", "On-prem option", "API access", "Team analytics"],
-    cta: "Contact Sales",
+    cta: "Upgrade to Enterprise",
     ctaHref: "/dashboard/settings",
+    planKey: "ENTERPRISE",
     popular: false,
   },
 ];
@@ -115,7 +118,11 @@ export function Pricing() {
                 ))}
               </ul>
               <Link
-                href={plan.ctaHref}
+                href={
+                  plan.planKey === "FREE"
+                    ? plan.ctaHref
+                    : `${plan.ctaHref}?upgrade=${plan.planKey}&interval=${annual ? "YEARLY" : "MONTHLY"}`
+                }
                 className={`mt-8 block text-center py-3 rounded-xl font-semibold text-sm transition-all ${plan.popular ? "bg-white text-surface-900 hover:bg-surface-100" : "bg-brand-500 text-white hover:bg-brand-600"}`}
               >
                 {plan.cta}

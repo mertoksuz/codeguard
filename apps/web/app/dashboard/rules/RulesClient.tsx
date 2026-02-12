@@ -11,6 +11,7 @@ interface BuiltinRule {
   group: string;
   enabled: boolean;
   severity: string;
+  locked: boolean;
 }
 
 interface CustomRule {
@@ -53,7 +54,7 @@ export default function RulesClient({
 
   const toggleBuiltin = async (ruleId: string) => {
     const rule = builtins.find((r) => r.id === ruleId);
-    if (!rule) return;
+    if (!rule || rule.locked) return;
     const newEnabled = !rule.enabled;
     setBuiltins((prev) => prev.map((r) => (r.id === ruleId ? { ...r, enabled: newEnabled } : r)));
     setSaving(ruleId);
@@ -260,14 +261,15 @@ export default function RulesClient({
                 .map((rule) => (
                   <div
                     key={rule.id}
-                    className="flex items-center justify-between py-4 px-6 hover:bg-surface-50 transition-colors"
+                    className={`flex items-center justify-between py-4 px-6 hover:bg-surface-50 transition-colors ${rule.locked ? "opacity-60" : ""}`}
                   >
                     <div className="flex items-center gap-4">
                       <button
                         onClick={() => toggleBuiltin(rule.id)}
+                        disabled={rule.locked}
                         className={`w-10 h-6 rounded-full transition-colors ${
                           rule.enabled ? "bg-brand-500" : "bg-surface-300"
-                        } relative`}
+                        } relative ${rule.locked ? "cursor-not-allowed" : "cursor-pointer"}`}
                       >
                         <div
                           className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
@@ -279,14 +281,21 @@ export default function RulesClient({
                         <div className="font-medium text-sm text-surface-900">
                           {rule.name}{" "}
                           <span className="text-surface-400 font-mono text-xs ml-1">({rule.id})</span>
+                          {rule.locked && (
+                            <span className="ml-2 text-xs font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Pro+</span>
+                          )}
                         </div>
-                        <div className="text-xs text-surface-400 mt-0.5">{rule.desc}</div>
+                        <div className="text-xs text-surface-400 mt-0.5">
+                          {rule.desc}
+                          {rule.locked && " — Upgrade to Pro to enable this rule"}
+                        </div>
                       </div>
                     </div>
                     <select
                       value={rule.severity}
                       onChange={(e) => changeSeverity(rule.id, e.target.value)}
-                      className="text-xs border border-surface-200 rounded-lg px-2 py-1 bg-white text-surface-600"
+                      disabled={rule.locked}
+                      className={`text-xs border border-surface-200 rounded-lg px-2 py-1 bg-white text-surface-600 ${rule.locked ? "cursor-not-allowed" : ""}`}
                     >
                       <option value="ERROR">Error</option>
                       <option value="WARNING">Warning</option>

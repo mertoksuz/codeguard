@@ -124,7 +124,7 @@ export async function createCheckoutForm(params: CheckoutFormParams) {
   const priceTL = params.interval === "YEARLY" ? planDef.yearlyPriceTL : planDef.monthlyPriceTL;
   const priceStr = (priceTL / 100).toFixed(2); // "899.00"
 
-  const conversationId = `${params.teamId}-${Date.now()}`;
+  const conversationId = `${params.teamId}__${params.plan}__${params.interval}__${Date.now()}`;
 
   const body = {
     locale: "tr",

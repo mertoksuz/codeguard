@@ -76,14 +76,22 @@ async function getTeamRules(teamId?: string): Promise<{ builtinRules: string[]; 
   if (!teamId) return { builtinRules: ALL_BUILTIN_RULES, customPrompts: [] };
 
   try {
+    // Get the team's plan to determine allowed rules
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { plan: true },
+    });
+    const planLimits = PLAN_LIMITS[team?.plan || "FREE"] || PLAN_LIMITS.FREE;
+    const allowedBuiltinRules = planLimits.builtinRules;
+
     const [ruleConfigs, customRules] = await Promise.all([
       prisma.ruleConfig.findMany({ where: { teamId } }),
       prisma.customRule.findMany({ where: { teamId, enabled: true } }),
     ]);
 
-    // Determine enabled built-in rules (all enabled by default, unless explicitly disabled)
+    // Determine enabled built-in rules (only from allowed set, unless explicitly disabled)
     const disabledSet = new Set(ruleConfigs.filter((c) => !c.enabled).map((c) => c.ruleId));
-    const builtinRules = ALL_BUILTIN_RULES.filter((r) => !disabledSet.has(r));
+    const builtinRules = allowedBuiltinRules.filter((r) => !disabledSet.has(r));
 
     // Custom rule prompts
     const customPrompts = customRules.map((r) => `[${r.name}] (severity: ${r.severity}): ${r.prompt}`);
@@ -264,10 +272,25 @@ async function sendSlackResult(
 }
 
 // ─── Plan limits ───────────────────────────────────
-const PLAN_REVIEW_LIMITS: Record<string, number> = {
-  FREE: 50,
-  PRO: 500,
-  ENTERPRISE: -1, // unlimited
+const PLAN_LIMITS: Record<string, { reviews: number; repos: number; autoFix: boolean; builtinRules: string[] }> = {
+  FREE: {
+    reviews: 50,
+    repos: 1,
+    autoFix: false,
+    builtinRules: ["SRP", "OCP", "LSP", "ISP", "DIP"], // 5 SOLID rules only
+  },
+  PRO: {
+    reviews: 500,
+    repos: -1, // unlimited
+    autoFix: true,
+    builtinRules: ALL_BUILTIN_RULES, // all 9+
+  },
+  ENTERPRISE: {
+    reviews: -1, // unlimited
+    repos: -1,
+    autoFix: true,
+    builtinRules: ALL_BUILTIN_RULES,
+  },
 };
 
 async function checkAndIncrementUsage(teamId?: string): Promise<{ allowed: boolean; reason?: string }> {
@@ -293,7 +316,7 @@ async function checkAndIncrementUsage(teamId?: string): Promise<{ allowed: boole
       team.reviewsUsedThisMonth = 0;
     }
 
-    const limit = PLAN_REVIEW_LIMITS[team.plan] ?? 50;
+    const limit = PLAN_LIMITS[team.plan]?.reviews ?? 50;
     if (limit !== -1 && team.reviewsUsedThisMonth >= limit) {
       return {
         allowed: false,
@@ -387,18 +410,40 @@ const analysisWorker = new Worker(
     // 4. Persist review to DB (always try, even without teamId)
     try {
       if (teamId) {
-        // Upsert repository
-        const repository = await prisma.repository.upsert({
-          where: { fullName_teamId: { fullName: repositoryFullName, teamId } },
-          create: {
-            name: repo,
-            fullName: repositoryFullName,
-            owner,
-            url: `https://github.com/${repositoryFullName}`,
-            teamId,
-          },
-          update: { updatedAt: new Date() },
+        // Check repo limit before upserting
+        const team = await prisma.team.findUnique({
+          where: { id: teamId },
+          select: { plan: true, _count: { select: { repositories: true } } },
         });
+        const repoLimit = PLAN_LIMITS[team?.plan || "FREE"]?.repos ?? 1;
+        const existingRepo = await prisma.repository.findUnique({
+          where: { fullName_teamId: { fullName: repositoryFullName, teamId } },
+        });
+
+        // If this is a new repo and we're at the limit, warn but continue analysis
+        if (!existingRepo && repoLimit !== -1 && (team?._count.repositories ?? 0) >= repoLimit) {
+          console.warn(`  ⚠️  Repo limit reached (${team?._count.repositories}/${repoLimit}). Review will be analyzed but not persisted.`);
+          if (slackChannel) {
+            const slackClient = await getSlackForTeam(teamId);
+            await slackClient.chat.postMessage({
+              channel: slackChannel,
+              thread_ts: slackThreadTs,
+              text: `⚠️ *Repository limit reached* (${team?._count.repositories}/${repoLimit}). Upgrade your plan to track more repositories.`,
+            });
+          }
+        } else {
+          // Upsert repository
+          const repository = await prisma.repository.upsert({
+            where: { fullName_teamId: { fullName: repositoryFullName, teamId } },
+            create: {
+              name: repo,
+              fullName: repositoryFullName,
+              owner,
+              url: `https://github.com/${repositoryFullName}`,
+              teamId,
+            },
+            update: { updatedAt: new Date() },
+          });
 
         const criticalCount = issues.filter((i: any) => i.severity === "error").length;
         const warningCount = issues.filter((i: any) => i.severity === "warning").length;
@@ -442,6 +487,7 @@ const analysisWorker = new Worker(
           },
         });
         console.log(`  💾 Review saved to DB (id: ${review.id})`);
+        } // end else (repo limit OK)
       } else {
         console.warn(`  ⚠️  No teamId — review not saved to DB. Analysis still sent to Slack.`);
       }
@@ -667,6 +713,28 @@ const fixWorker = new Worker(
     }
 
     console.log(`🔧 Auto-fix started for ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
+
+    // 0. Check if plan allows auto-fix (Pro+ only)
+    if (teamId) {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { plan: true },
+      });
+      const planLimits = PLAN_LIMITS[team?.plan || "FREE"] || PLAN_LIMITS.FREE;
+      if (!planLimits.autoFix) {
+        console.log(`  ⛔ Auto-fix not available on ${team?.plan || "FREE"} plan`);
+        if (slackChannel) {
+          const slackClient = await getSlackForTeam(teamId);
+          const vts = slackThreadTs && /^\d+\.\d+$/.test(String(slackThreadTs)) ? String(slackThreadTs) : undefined;
+          await slackClient.chat.postMessage({
+            channel: slackChannel,
+            thread_ts: vts,
+            text: "⛔ *Auto-fix is available on Pro and Enterprise plans only.*\nUpgrade at codeguard-api-one.vercel.app/dashboard/settings",
+          });
+        }
+        return { filesFixed: 0, skipped: true, reason: "Auto-fix requires Pro or Enterprise plan" };
+      }
+    }
 
     const [owner, repo] = repositoryFullName.split("/");
     const octokit = await getOctokitForTeam(teamId);

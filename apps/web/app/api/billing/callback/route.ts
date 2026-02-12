@@ -25,31 +25,34 @@ export async function POST(req: NextRequest) {
       return redirectWithStatus("error", "Payment was not successful");
     }
 
-    // Parse team ID and plan from the basket/conversation ID
-    // conversationId format: "teamId-timestamp"
+    // Parse team ID, plan, and interval from the conversation ID
+    // conversationId format: "teamId__PLAN__INTERVAL__timestamp"
     const conversationId = result.conversationId || "";
-    const teamId = conversationId.split("-").slice(0, -1).join("-") || "";
-    const basketId = result.basketId || "";
+    const parts = conversationId.split("__");
+
+    let teamId = "";
+    let plan: PlanKey = "PRO";
+    let interval: "MONTHLY" | "YEARLY" = "MONTHLY";
+
+    if (parts.length >= 4) {
+      teamId = parts[0];
+      plan = (parts[1] as PlanKey) || "PRO";
+      interval = (parts[2] as "MONTHLY" | "YEARLY") || "MONTHLY";
+    } else {
+      // Fallback for legacy format "teamId-timestamp"
+      teamId = conversationId.split("-").slice(0, -1).join("-") || "";
+    }
 
     if (!teamId) {
       console.error("Could not extract teamId from conversationId:", conversationId);
       return redirectWithStatus("error", "Invalid session");
     }
 
-    // Determine plan from basket items
-    let plan: PlanKey = "PRO";
-    let interval: "MONTHLY" | "YEARLY" = "MONTHLY";
+    // Validate plan
+    if (!PLANS[plan]) plan = "PRO";
+    if (interval !== "YEARLY") interval = "MONTHLY";
 
-    if (basketId.includes("enterprise") || conversationId.includes("enterprise")) {
-      plan = "ENTERPRISE";
-    }
-    // Check if basket item hints at yearly
     const priceNum = parseFloat(result.paidPrice || "0");
-    const planDef = PLANS[plan];
-    const yearlyPriceFloat = planDef.yearlyPriceTL / 100;
-    if (Math.abs(priceNum - yearlyPriceFloat) < 1) {
-      interval = "YEARLY";
-    }
 
     const amountKurus = Math.round(priceNum * 100);
 

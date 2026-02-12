@@ -45,9 +45,27 @@ interface SettingsClientProps {
   isOwner: boolean;
 }
 
-const PLAN_PRICES = {
-  PRO: { monthly: "₺899", yearly: "₺719/ay" },
-  ENTERPRISE: { monthly: "₺3.499", yearly: "₺2.799/ay" },
+const PLAN_INFO = {
+  PRO: {
+    name: "Pro",
+    monthlyPrice: "₺899",
+    yearlyPrice: "₺719",
+    yearlyTotal: "₺8.628",
+    monthlyTotal: "₺10.788",
+    features: "500 reviews/mo, unlimited repos, auto-fix PRs, 20 custom rules",
+    badge: "Popular" as const,
+    badgeVariant: "brand" as const,
+  },
+  ENTERPRISE: {
+    name: "Enterprise",
+    monthlyPrice: "₺3.499",
+    yearlyPrice: "₺2.799",
+    yearlyTotal: "₺33.588",
+    monthlyTotal: "₺41.988",
+    features: "Unlimited everything, SSO, SLA, dedicated support",
+    badge: "Custom" as const,
+    badgeVariant: "info" as const,
+  },
 };
 
 export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) {
@@ -55,8 +73,9 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
   const [loading, setLoading] = useState(false);
   const [checkoutHtml, setCheckoutHtml] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [billingInterval, setBillingInterval] = useState<"MONTHLY" | "YEARLY">("YEARLY");
 
-  // Show billing callback result
+  // Show billing callback result + auto-trigger checkout from URL params
   useEffect(() => {
     const billingStatus = searchParams.get("billing");
     const billingMessage = searchParams.get("message");
@@ -65,10 +84,21 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
         type: billingStatus === "success" ? "success" : "error",
         text: billingMessage,
       });
-      // Clean URL
       window.history.replaceState({}, "", "/dashboard/settings");
+      return;
     }
-  }, [searchParams]);
+
+    // Auto-trigger checkout if ?upgrade=PRO&interval=YEARLY
+    const upgradePlan = searchParams.get("upgrade") as "PRO" | "ENTERPRISE" | null;
+    const upgradeInterval = searchParams.get("interval") as "MONTHLY" | "YEARLY" | null;
+    if (upgradePlan && ["PRO", "ENTERPRISE"].includes(upgradePlan) && isOwner) {
+      const interval = upgradeInterval === "MONTHLY" ? "MONTHLY" : "YEARLY";
+      setBillingInterval(interval);
+      // Clean URL first, then trigger checkout
+      window.history.replaceState({}, "", "/dashboard/settings");
+      handleUpgrade(upgradePlan, interval);
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleUpgrade(plan: "PRO" | "ENTERPRISE", interval: "MONTHLY" | "YEARLY") {
     setLoading(true);
@@ -295,12 +325,39 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
         {!isEnterprise && isOwner && (
           <Card>
             <CardHeader>
-              <CardTitle>{isFree ? "Upgrade Your Plan" : "Change Plan"}</CardTitle>
-              <CardDescription>
-                {isFree
-                  ? "Unlock more reviews, custom rules, and advanced features"
-                  : "Switch to a different plan"}
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>{isFree ? "Upgrade Your Plan" : "Change Plan"}</CardTitle>
+                  <CardDescription>
+                    {isFree
+                      ? "Unlock more reviews, custom rules, and advanced features"
+                      : "Switch to a different plan"}
+                  </CardDescription>
+                </div>
+                {/* Monthly / Yearly Toggle */}
+                <div className="inline-flex items-center gap-1 bg-surface-100 rounded-xl p-1 border border-surface-200">
+                  <button
+                    onClick={() => setBillingInterval("MONTHLY")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      billingInterval === "MONTHLY"
+                        ? "bg-brand-500 text-white shadow-sm"
+                        : "text-surface-500 hover:text-surface-700"
+                    }`}
+                  >
+                    Monthly
+                  </button>
+                  <button
+                    onClick={() => setBillingInterval("YEARLY")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      billingInterval === "YEARLY"
+                        ? "bg-brand-500 text-white shadow-sm"
+                        : "text-surface-500 hover:text-surface-700"
+                    }`}
+                  >
+                    Yearly <span className="opacity-80">(-20%)</span>
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
@@ -308,66 +365,64 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
                 {!isPro && (
                   <div className="border border-surface-200 rounded-xl p-5 space-y-3 hover:border-brand-300 transition-colors">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-surface-900">Pro</h3>
+                      <h3 className="font-bold text-surface-900">{PLAN_INFO.PRO.name}</h3>
                       <Badge variant="brand">Popular</Badge>
                     </div>
-                    <p className="text-sm text-surface-500">500 reviews/mo, unlimited repos, auto-fix PRs</p>
+                    <p className="text-sm text-surface-500">{PLAN_INFO.PRO.features}</p>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-2xl font-extrabold text-surface-900">₺899</span>
+                      <span className="text-2xl font-extrabold text-surface-900">
+                        {billingInterval === "YEARLY" ? PLAN_INFO.PRO.yearlyPrice : PLAN_INFO.PRO.monthlyPrice}
+                      </span>
                       <span className="text-sm text-surface-500">/ay</span>
+                      {billingInterval === "YEARLY" && (
+                        <span className="ml-2 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">
+                          Save ₺2.160/yr
+                        </span>
+                      )}
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => handleUpgrade("PRO", "MONTHLY")}
-                        disabled={loading}
-                        className="flex-1"
-                      >
-                        {loading ? "..." : "Aylık"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleUpgrade("PRO", "YEARLY")}
-                        disabled={loading}
-                        className="flex-1"
-                      >
-                        {loading ? "..." : "Yıllık ₺719/ay"}
-                      </Button>
-                    </div>
+                    {billingInterval === "YEARLY" && (
+                      <p className="text-xs text-surface-400">Billed as {PLAN_INFO.PRO.yearlyTotal}/year</p>
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={() => handleUpgrade("PRO", billingInterval)}
+                      disabled={loading}
+                      className="w-full"
+                    >
+                      {loading ? "Processing..." : `Upgrade to Pro — ${billingInterval === "YEARLY" ? "Yearly" : "Monthly"}`}
+                    </Button>
                   </div>
                 )}
 
                 {/* Enterprise Plan */}
                 <div className="border border-surface-200 rounded-xl p-5 space-y-3 hover:border-brand-300 transition-colors">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-surface-900">Enterprise</h3>
+                    <h3 className="font-bold text-surface-900">{PLAN_INFO.ENTERPRISE.name}</h3>
                     <Badge variant="info">Custom</Badge>
                   </div>
-                  <p className="text-sm text-surface-500">Unlimited everything, SSO, SLA, dedicated support</p>
+                  <p className="text-sm text-surface-500">{PLAN_INFO.ENTERPRISE.features}</p>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-2xl font-extrabold text-surface-900">₺3.499</span>
+                    <span className="text-2xl font-extrabold text-surface-900">
+                      {billingInterval === "YEARLY" ? PLAN_INFO.ENTERPRISE.yearlyPrice : PLAN_INFO.ENTERPRISE.monthlyPrice}
+                    </span>
                     <span className="text-sm text-surface-500">/ay</span>
+                    {billingInterval === "YEARLY" && (
+                      <span className="ml-2 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">
+                        Save ₺8.400/yr
+                      </span>
+                    )}
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => handleUpgrade("ENTERPRISE", "MONTHLY")}
-                      disabled={loading}
-                      className="flex-1"
-                    >
-                      {loading ? "..." : "Aylık"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleUpgrade("ENTERPRISE", "YEARLY")}
-                      disabled={loading}
-                      className="flex-1"
-                    >
-                      {loading ? "..." : "Yıllık ₺2.799/ay"}
-                    </Button>
-                  </div>
+                  {billingInterval === "YEARLY" && (
+                    <p className="text-xs text-surface-400">Billed as {PLAN_INFO.ENTERPRISE.yearlyTotal}/year</p>
+                  )}
+                  <Button
+                    size="sm"
+                    onClick={() => handleUpgrade("ENTERPRISE", billingInterval)}
+                    disabled={loading}
+                    className="w-full"
+                  >
+                    {loading ? "Processing..." : `Upgrade to Enterprise — ${billingInterval === "YEARLY" ? "Yearly" : "Monthly"}`}
+                  </Button>
                 </div>
               </div>
             </CardContent>
