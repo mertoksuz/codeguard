@@ -22,7 +22,8 @@
         "ANTHROPIC_API_KEY",
         "IYZICO_API_KEY",
         "IYZICO_SECRET_KEY",
-        "IYZICO_BASE_URL"
+        "IYZICO_BASE_URL",
+        "ADMIN_EMAILS"
       ]
     },
     "dev": {
