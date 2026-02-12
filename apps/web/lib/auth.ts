@@ -117,8 +117,9 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      // For subsequent requests, attach teamId if not present
-      if (token.userId && !token.teamId) {
+      // For subsequent requests (not initial sign-in), always refresh team data from DB
+      // This ensures plan changes (e.g. after billing callback) are reflected immediately
+      if (token.userId && !(user && account)) {
         const membership = await prisma.teamMember.findFirst({
           where: { userId: token.userId as string },
           include: { team: true },

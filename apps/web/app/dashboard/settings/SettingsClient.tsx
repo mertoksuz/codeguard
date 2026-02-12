@@ -116,11 +116,26 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
   useEffect(() => {
     const billingStatus = searchParams.get("billing");
     const billingMessage = searchParams.get("message");
+    const refreshed = searchParams.get("refreshed");
+
     if (billingStatus && billingMessage) {
       setMessage({
         type: billingStatus === "success" ? "success" : "error",
         text: billingMessage,
       });
+
+      // After a successful payment, force session + page refresh once
+      // so the sidebar picks up the new plan from the updated JWT
+      if (billingStatus === "success" && !refreshed) {
+        // First clear URL, then reload with refreshed flag to prevent loop
+        window.history.replaceState({}, "", "/dashboard/settings");
+        // Trigger NextAuth to re-issue the JWT with updated plan from DB
+        fetch("/api/auth/session").then(() => {
+          window.location.href = `/dashboard/settings?billing=success&message=${encodeURIComponent(billingMessage)}&refreshed=1`;
+        });
+        return;
+      }
+
       window.history.replaceState({}, "", "/dashboard/settings");
       return;
     }
