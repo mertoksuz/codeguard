@@ -32,8 +32,8 @@ export const PLANS = {
   },
   PRO: {
     name: "Pro",
-    monthlyPriceTL: 89900, // 899.00 TL in kuruş
-    yearlyPriceTL: 71900,  // 719.00 TL/mo billed yearly
+    monthlyPriceTL: 70000, // 700.00 TL in kurus
+    yearlyPriceTL: 60000,  // 600.00 TL/mo billed yearly
     reviewsPerMonth: 500,
     maxRepos: -1, // unlimited
     maxCustomRules: 20,
@@ -50,8 +50,8 @@ export const PLANS = {
   },
   ENTERPRISE: {
     name: "Enterprise",
-    monthlyPriceTL: 349900, // 3,499.00 TL in kuruş
-    yearlyPriceTL: 279900,  // 2,799.00 TL/mo billed yearly
+    monthlyPriceTL: 200000, // 2,000.00 TL in kurus
+    yearlyPriceTL: 170000,  // 1,700.00 TL/mo billed yearly
     reviewsPerMonth: -1, // unlimited
     maxRepos: -1,
     maxCustomRules: -1,
