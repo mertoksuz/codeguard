@@ -19,7 +19,10 @@
         "API_SECRET",
         "AI_PROVIDER",
         "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY"
+        "ANTHROPIC_API_KEY",
+        "IYZICO_API_KEY",
+        "IYZICO_SECRET_KEY",
+        "IYZICO_BASE_URL"
       ]
     },
     "dev": {

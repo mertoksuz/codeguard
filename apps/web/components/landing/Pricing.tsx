@@ -8,28 +8,37 @@ const plans = [
   {
     name: "Free",
     desc: "Perfect for trying out CodeGuard AI",
-    monthlyPrice: 0,
-    yearlyPrice: 0,
+    monthlyPrice: "₺0",
+    yearlyPrice: "₺0",
+    monthlyRaw: 0,
+    yearlyRaw: 0,
     features: ["50 reviews/month", "5 SOLID rules", "Slack integration", "Basic dashboard", "1 repository"],
     cta: "Start Free",
+    ctaHref: "/auth/register",
     popular: false,
   },
   {
     name: "Pro",
     desc: "For growing teams shipping quality code",
-    monthlyPrice: 49,
-    yearlyPrice: 39,
+    monthlyPrice: "₺899",
+    yearlyPrice: "₺719",
+    monthlyRaw: 899,
+    yearlyRaw: 719,
     features: ["500 reviews/month", "All 9+ rules", "Auto-fix PRs", "Advanced dashboard", "Unlimited repos", "Custom rule config", "Priority support"],
     cta: "Start Pro Trial",
+    ctaHref: "/dashboard/settings",
     popular: true,
   },
   {
     name: "Enterprise",
     desc: "For large organizations with custom needs",
-    monthlyPrice: 199,
-    yearlyPrice: 159,
+    monthlyPrice: "₺3.499",
+    yearlyPrice: "₺2.799",
+    monthlyRaw: 3499,
+    yearlyRaw: 2799,
     features: ["Unlimited reviews", "Custom rules engine", "SSO & SAML", "Dedicated support", "SLA guarantee", "On-prem option", "API access", "Team analytics"],
     cta: "Contact Sales",
+    ctaHref: "/dashboard/settings",
     popular: false,
   },
 ];
@@ -89,10 +98,10 @@ export function Pricing() {
               <p className={`text-sm mt-1 ${plan.popular ? "text-surface-300" : "text-surface-500"}`}>{plan.desc}</p>
               <div className="mt-6 flex items-baseline gap-1">
                 <span className={`text-5xl font-extrabold ${plan.popular ? "text-white" : "text-surface-900"}`}>
-                  ${annual ? plan.yearlyPrice : plan.monthlyPrice}
+                  {annual ? plan.yearlyPrice : plan.monthlyPrice}
                 </span>
-                {plan.monthlyPrice > 0 && (
-                  <span className={`text-sm ${plan.popular ? "text-surface-400" : "text-surface-500"}`}>/month</span>
+                {plan.monthlyRaw > 0 && (
+                  <span className={`text-sm ${plan.popular ? "text-surface-400" : "text-surface-500"}`}>/ay</span>
                 )}
               </div>
               <ul className="mt-8 space-y-3">
@@ -106,7 +115,7 @@ export function Pricing() {
                 ))}
               </ul>
               <Link
-                href="/auth/register"
+                href={plan.ctaHref}
                 className={`mt-8 block text-center py-3 rounded-xl font-semibold text-sm transition-all ${plan.popular ? "bg-white text-surface-900 hover:bg-surface-100" : "bg-brand-500 text-white hover:bg-brand-600"}`}
               >
                 {plan.cta}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@codeguard/db";
+import { PLANS, type PlanKey } from "@/lib/iyzico";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,20 @@ export async function POST(req: NextRequest) {
     const { name, prompt, severity, description } = body;
     if (!name || !prompt) {
       return NextResponse.json({ error: "Name and prompt are required" }, { status: 400 });
+    }
+
+    // Check plan limit for custom rules
+    const team = await prisma.team.findUnique({ where: { id: teamId }, select: { plan: true } });
+    const planKey = (team?.plan || "FREE") as PlanKey;
+    const maxCustomRules = PLANS[planKey].maxCustomRules;
+    if (maxCustomRules !== -1) {
+      const currentCount = await prisma.customRule.count({ where: { teamId } });
+      if (currentCount >= maxCustomRules) {
+        return NextResponse.json(
+          { error: `Custom rule limit reached (${currentCount}/${maxCustomRules}). Upgrade your plan to add more.` },
+          { status: 403 }
+        );
+      }
     }
 
     const slug = name

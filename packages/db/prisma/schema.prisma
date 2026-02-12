@@ -69,12 +69,14 @@ model VerificationToken {
 // ─── Teams & Organizations ─────────────────────────
 
 model Team {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  plan      Plan     @default(FREE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  plan                Plan     @default(FREE)
+  reviewsUsedThisMonth Int     @default(0)
+  reviewsResetAt      DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   members       TeamMember[]
   repositories  Repository[]
@@ -82,6 +84,7 @@ model Team {
   ruleConfigs   RuleConfig[]
   customRules   CustomRule[]
   subscription  Subscription?
+  payments      Payment[]
   slackInstall  SlackInstallation?
   githubInstall GitHubInstallation?
 
@@ -254,6 +257,7 @@ model GitHubInstallation {
 
 model Subscription {
   id                     String             @id @default(cuid())
+  plan                   Plan               @default(PRO)
   iyzicoCustomerEmail    String?
   iyzicoSubscriptionRef  String?            @unique
   iyzicoPricingPlanRef   String?
@@ -262,6 +266,8 @@ model Subscription {
   currentPeriodStart     DateTime?
   currentPeriodEnd       DateTime?
   cancelAtPeriodEnd      Boolean            @default(false)
+  interval               BillingInterval    @default(MONTHLY)
+  amountTL               Int                @default(0)       // amount in kuruş (TL cents)
   teamId                 String             @unique
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
@@ -269,6 +275,23 @@ model Subscription {
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  iyzicoPaymentId   String?       @unique
+  amount            Int                               // kuruş (TL cents)
+  currency          String        @default("TRY")
+  status            PaymentStatus @default(PENDING)
+  description       String?
+  cardLastFour      String?
+  teamId            String
+  createdAt         DateTime      @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("payments")
 }
 
 // ─── Enums ─────────────────────────────────────────
@@ -311,4 +334,16 @@ enum SubscriptionStatus {
   PAST_DUE
   TRIALING
   INCOMPLETE
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
 }

@@ -263,12 +263,79 @@ async function sendSlackResult(
   });
 }
 
+// ─── Plan limits ───────────────────────────────────
+const PLAN_REVIEW_LIMITS: Record<string, number> = {
+  FREE: 50,
+  PRO: 500,
+  ENTERPRISE: -1, // unlimited
+};
+
+async function checkAndIncrementUsage(teamId?: string): Promise<{ allowed: boolean; reason?: string }> {
+  if (!teamId) return { allowed: true };
+
+  try {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { plan: true, reviewsUsedThisMonth: true, reviewsResetAt: true },
+    });
+
+    if (!team) return { allowed: true };
+
+    // Check if we need to reset the monthly counter
+    const now = new Date();
+    const resetAt = new Date(team.reviewsResetAt);
+    const monthDiff = (now.getFullYear() - resetAt.getFullYear()) * 12 + (now.getMonth() - resetAt.getMonth());
+    if (monthDiff >= 1) {
+      await prisma.team.update({
+        where: { id: teamId },
+        data: { reviewsUsedThisMonth: 0, reviewsResetAt: now },
+      });
+      team.reviewsUsedThisMonth = 0;
+    }
+
+    const limit = PLAN_REVIEW_LIMITS[team.plan] ?? 50;
+    if (limit !== -1 && team.reviewsUsedThisMonth >= limit) {
+      return {
+        allowed: false,
+        reason: `Review limit reached (${team.reviewsUsedThisMonth}/${limit}). Upgrade your plan at codeguard-api-one.vercel.app/dashboard/settings`,
+      };
+    }
+
+    // Increment usage
+    await prisma.team.update({
+      where: { id: teamId },
+      data: { reviewsUsedThisMonth: { increment: 1 } },
+    });
+
+    return { allowed: true };
+  } catch (e: any) {
+    console.warn(`  ⚠️  Usage check failed: ${e.message}`);
+    return { allowed: true }; // fail open
+  }
+}
+
 // ─── Analysis Worker ───────────────────────────────
 const analysisWorker = new Worker(
   "analysis",
   async (job) => {
     const { repositoryFullName, prNumber, slackChannel, slackThreadTs, teamId } = job.data;
     console.log(`📊 Analyzing ${repositoryFullName}#${prNumber}${teamId ? ` (team: ${teamId})` : ""}...`);
+
+    // 0. Check plan limits
+    const { allowed, reason } = await checkAndIncrementUsage(teamId);
+    if (!allowed) {
+      console.log(`  ⛔ ${reason}`);
+      // Notify via Slack if channel available
+      if (slackChannel) {
+        const slackClient = await getSlackForTeam(teamId);
+        await slackClient.chat.postMessage({
+          channel: slackChannel,
+          thread_ts: slackThreadTs,
+          text: `⛔ *Review limit reached*\n${reason}`,
+        });
+      }
+      return { score: 0, issueCount: 0, skipped: true, reason };
+    }
 
     const [owner, repo] = repositoryFullName.split("/");
     const octokit = await getOctokitForTeam(teamId);
