@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -67,6 +67,43 @@ const PLAN_INFO = {
     badgeVariant: "info" as const,
   },
 };
+
+/**
+ * Renders iyzico checkout form HTML and properly executes embedded <script> tags.
+ * React's dangerouslySetInnerHTML doesn't execute scripts — this component does.
+ */
+function IyzicoCheckoutRenderer({ html }: { html: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !html) return;
+
+    // 1. Insert raw HTML
+    container.innerHTML = html;
+
+    // 2. Find all script tags and re-create them so the browser executes them
+    const scripts = container.querySelectorAll("script");
+    scripts.forEach((oldScript) => {
+      const newScript = document.createElement("script");
+      // Copy attributes (src, type, etc.)
+      Array.from(oldScript.attributes).forEach((attr) => {
+        newScript.setAttribute(attr.name, attr.value);
+      });
+      // Copy inline script content
+      if (oldScript.textContent) {
+        newScript.textContent = oldScript.textContent;
+      }
+      oldScript.parentNode?.replaceChild(newScript, oldScript);
+    });
+
+    return () => {
+      container.innerHTML = "";
+    };
+  }, [html]);
+
+  return <div ref={containerRef} className="iyzico-checkout min-h-[400px]" />;
+}
 
 export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) {
   const searchParams = useSearchParams();
@@ -193,10 +230,7 @@ export function SettingsClient({ billing, user, isOwner }: SettingsClientProps) 
             <CardDescription>Enter your card details below to complete the upgrade</CardDescription>
           </CardHeader>
           <CardContent>
-            <div
-              dangerouslySetInnerHTML={{ __html: checkoutHtml }}
-              className="iyzico-checkout"
-            />
+            <IyzicoCheckoutRenderer html={checkoutHtml} />
           </CardContent>
         </Card>
       </div>
