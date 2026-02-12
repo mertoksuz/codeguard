@@ -23,7 +23,11 @@
         "IYZICO_API_KEY",
         "IYZICO_SECRET_KEY",
         "IYZICO_BASE_URL",
-        "ADMIN_EMAILS"
+        "ADMIN_EMAILS",
+        "ANALYSIS_MODEL",
+        "FIX_MODEL",
+        "OPENAI_MODEL",
+        "ANTHROPIC_MODEL"
       ]
     },
     "dev": {

@@ -104,7 +104,7 @@ async function getTeamRules(teamId?: string): Promise<{ builtinRules: string[]; 
 }
 
 // ─── Fetch PR diff from GitHub ─────────────────────
-async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber: number): Promise<{ diff: string; title: string; url: string }> {
+async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber: number): Promise<{ diff: string; title: string; url: string; headSha: string }> {
   const { data: pr } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
   const { data: diff } = await octokit.pulls.get({
     owner, repo, pull_number: prNumber,
@@ -114,47 +114,120 @@ async function getPRDiff(octokit: Octokit, owner: string, repo: string, prNumber
     diff: diff as unknown as string,
     title: pr.title,
     url: pr.html_url,
+    headSha: pr.head.sha,
   };
+}
+
+// ─── Smart diff preprocessing (token optimization) ─
+const SKIP_EXTENSIONS = new Set([
+  ".lock", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2",
+  ".ttf", ".eot", ".mp4", ".mp3", ".pdf", ".zip", ".tar", ".gz", ".map",
+  ".min.js", ".min.css", ".d.ts", ".snap",
+]);
+const SKIP_FILES = new Set([
+  "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
+  ".gitignore", ".env.example", ".prettierrc", ".eslintignore",
+]);
+
+function preprocessDiff(rawDiff: string, maxChars: number = 10000): string {
+  const files = rawDiff.split(/^diff --git /m).filter(Boolean);
+  const processedHunks: string[] = [];
+  let totalLen = 0;
+
+  for (const file of files) {
+    // Extract filename from "a/path b/path"
+    const headerMatch = file.match(/^a\/(.+?) b\/(.+)/m);
+    const filename = headerMatch?.[2] || "";
+
+    // Skip binary files
+    if (file.includes("Binary files") || file.includes("GIT binary patch")) continue;
+
+    // Skip non-code files by extension
+    const ext = filename.includes(".") ? "." + filename.split(".").pop()!.toLowerCase() : "";
+    if (SKIP_EXTENSIONS.has(ext)) continue;
+
+    // Skip known noise files by name
+    const basename = filename.split("/").pop() || "";
+    if (SKIP_FILES.has(basename)) continue;
+
+    // Extract only added lines with line context
+    const lines = file.split("\n");
+    const relevantLines: string[] = [`--- ${filename} ---`];
+    let currentHunkHeader = "";
+
+    for (const line of lines) {
+      if (line.startsWith("@@")) {
+        currentHunkHeader = line; // Track hunk position
+        continue;
+      }
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        // Include hunk header once per group for line-number context
+        if (currentHunkHeader) {
+          relevantLines.push(currentHunkHeader);
+          currentHunkHeader = "";
+        }
+        relevantLines.push(line);
+      }
+    }
+
+    // Only include file if it has actual additions
+    if (relevantLines.length > 1) {
+      const chunk = relevantLines.join("\n") + "\n";
+      if (totalLen + chunk.length > maxChars) break;
+      processedHunks.push(chunk);
+      totalLen += chunk.length;
+    }
+  }
+
+  const result = processedHunks.join("\n");
+  return result || rawDiff.substring(0, maxChars); // Fallback to raw if parsing yields nothing
 }
 
 // ─── Analyze diff with AI (OpenAI or Claude) ──────
 const ANALYSIS_SYSTEM_PROMPT = (rules: string[], customPrompts: string[]) => {
-  let prompt = `You are an expert code reviewer. Analyze the following PR diff for violations of these SOLID and clean-code rules: ${rules.join(", ")}.`;
+  let prompt = `You are a code reviewer. Analyze this PR diff for violations of: ${rules.join(", ")}.`;
 
   if (customPrompts.length > 0) {
-    prompt += `\n\nAlso check for violations of these custom rules:\n${customPrompts.join("\n")}`;
+    prompt += `\nCustom rules:\n${customPrompts.join("\n")}`;
   }
 
-  prompt += `\nReturn JSON: { "issues": [{ "ruleId": string, "ruleName": string, "severity": "error"|"warning"|"info", "file": string, "line": number, "message": string, "suggestion": string }], "score": number }
-score is 0-100 (100 = perfect). Only return the JSON, no other text.`;
+  prompt += `\nReturn JSON: {"issues":[{"ruleId":string,"ruleName":string,"severity":"error"|"warning"|"info","file":string,"line":number,"message":string,"suggestion":string}],"score":number}
+score 0-100. JSON only.`;
   return prompt;
 };
 
 async function analyzeWithAI(diff: string, rules: string[], customPrompts: string[] = []) {
-  const truncatedDiff = diff.substring(0, 12000);
+  // Smart preprocessing: strip noise, keep only added code
+  const optimizedDiff = preprocessDiff(diff);
+  const inputChars = optimizedDiff.length;
+  console.log(`  📊 Token optimization: ${diff.length} → ${inputChars} chars (${Math.round((1 - inputChars / diff.length) * 100)}% reduction)`);
+
   let content = '{"issues":[],"score":100}';
 
+  // Use cheaper model for analysis (configurable)
+  const analysisModel = process.env.ANALYSIS_MODEL || (AI_PROVIDER === "claude" ? "claude-sonnet-4-20250514" : "gpt-4o-mini");
+
   if (AI_PROVIDER === "claude" && anthropic) {
-    console.log("  🤖 Using Claude for analysis...");
+    console.log(`  🤖 Using Claude (${analysisModel}) for analysis...`);
     const response = await anthropic.messages.create({
-      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
-      max_tokens: 4000,
+      model: analysisModel,
+      max_tokens: 2000,
       system: ANALYSIS_SYSTEM_PROMPT(rules, customPrompts),
-      messages: [{ role: "user", content: truncatedDiff }],
+      messages: [{ role: "user", content: optimizedDiff }],
     });
     const block = response.content[0];
     content = block.type === "text" ? block.text : content;
   } else {
-    console.log("  🤖 Using OpenAI for analysis...");
+    console.log(`  🤖 Using OpenAI (${analysisModel}) for analysis...`);
     const oa = openai || new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const response = await oa.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o",
+      model: analysisModel,
       messages: [
         { role: "system", content: ANALYSIS_SYSTEM_PROMPT(rules, customPrompts) },
-        { role: "user", content: truncatedDiff },
+        { role: "user", content: optimizedDiff },
       ],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 2000,
       response_format: { type: "json_object" },
     });
     content = response.choices[0]?.message?.content || content;
@@ -396,7 +469,23 @@ const analysisWorker = new Worker(
 
     // 1. Fetch PR diff
     const pr = await getPRDiff(octokit, owner, repo, prNumber);
-    console.log(`  📄 Fetched diff for "${pr.title}" (${pr.diff.length} chars)`);
+    console.log(`  📄 Fetched diff for "${pr.title}" (${pr.diff.length} chars, sha: ${pr.headSha.slice(0, 7)})`);
+
+    // 1b. Duplicate detection — skip if same PR+SHA already analyzed
+    if (teamId) {
+      try {
+        const existing = await prisma.review.findFirst({
+          where: { teamId, prNumber, branch: { contains: pr.headSha.slice(0, 7) }, status: "COMPLETED" },
+          select: { id: true, score: true, totalIssues: true },
+        });
+        if (existing) {
+          console.log(`  ⏭️  Already analyzed (review: ${existing.id}, score: ${existing.score}). Skipping duplicate.`);
+          return { score: existing.score, issueCount: existing.totalIssues, skipped: true, reason: "duplicate" };
+        }
+      } catch (e: any) {
+        console.warn(`  ⚠️  Dedup check failed: ${e.message}`);
+      }
+    }
 
     // 2. Get team rules
     const { builtinRules, customPrompts } = await getTeamRules(teamId);
@@ -449,8 +538,8 @@ const analysisWorker = new Worker(
         const warningCount = issues.filter((i: any) => i.severity === "warning").length;
         const infoCount = issues.filter((i: any) => i.severity === "info").length;
 
-        // Determine head branch from diff (fallback)
-        const branch = pr.url.split("/").pop() || "unknown";
+        // Determine head branch from diff (include sha for dedup)
+        const branch = `${pr.url.split("/").pop() || "unknown"}@${pr.headSha.slice(0, 7)}`;
 
         const review = await prisma.review.create({
           data: {
@@ -515,22 +604,24 @@ const analysisWorker = new Worker(
 );
 
 // ─── Generate fix with AI ──────────────────────────
-const FIX_SYSTEM_PROMPT = `You are an expert code fixer. You will be given a file's content and a list of code quality issues found by a reviewer.
-Return ONLY a JSON object: { "fixedContent": "<the entire fixed file content>" }
-Apply all the suggested fixes. Keep the file's original purpose and logic intact. Only fix the issues listed. Do not add comments about what you fixed.`;
+const FIX_SYSTEM_PROMPT = `You are a code fixer. Given a file and issues, return ONLY: {"fixedContent":"<entire fixed file>"}
+Apply all fixes. Keep original logic. No comments about fixes.`;
 
 async function generateFixWithAI(fileContent: string, issues: any[]): Promise<string> {
   const issueList = issues.map((i: any) =>
-    `- Line ${i.line}: [${i.severity}] ${i.ruleName}: ${i.message} (Suggestion: ${i.suggestion})`
+    `- L${i.line}: [${i.severity}] ${i.ruleName}: ${i.message}${i.suggestion ? ` → ${i.suggestion}` : ""}`
   ).join("\n");
 
-  const userPrompt = `File content:\n${"```"}\n${fileContent}\n${"```"}\n\nIssues to fix:\n${issueList}`;
+  const userPrompt = `File:\n${"```"}\n${fileContent}\n${"```"}\n\nFix:\n${issueList}`;
 
   let content = "";
 
+  // Use the stronger model for fixes (quality matters more)
+  const fixModel = process.env.FIX_MODEL || (AI_PROVIDER === "claude" ? (process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514") : (process.env.OPENAI_MODEL || "gpt-4o"));
+
   if (AI_PROVIDER === "claude" && anthropic) {
     const response = await anthropic.messages.create({
-      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+      model: fixModel,
       max_tokens: 8000,
       system: FIX_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
@@ -540,7 +631,7 @@ async function generateFixWithAI(fileContent: string, issues: any[]): Promise<st
   } else {
     const oa = openai || new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const response = await oa.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o",
+      model: fixModel,
       messages: [
         { role: "system", content: FIX_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
@@ -750,10 +841,39 @@ const fixWorker = new Worker(
     const prDiff = await getPRDiff(octokit, owner, repo, prNumber);
     console.log(`  📄 Diff: ${prDiff.diff.length} chars`);
 
-    // 3. Analyze with AI to find issues (using team rules)
-    const { builtinRules, customPrompts } = await getTeamRules(teamId);
-    const { issues } = await analyzeWithAI(prDiff.diff, builtinRules, customPrompts);
-    console.log(`  🧠 Found ${issues.length} issues to fix`);
+    // 3. Reuse existing issues from DB (avoid duplicate AI call)
+    let issues: any[] = [];
+    if (teamId) {
+      try {
+        const existingReview = await prisma.review.findFirst({
+          where: { teamId, prNumber, repository: { fullName: repositoryFullName }, status: "COMPLETED" },
+          orderBy: { createdAt: "desc" },
+          include: { issues: true },
+        });
+        if (existingReview && existingReview.issues.length > 0) {
+          issues = existingReview.issues.map((i) => ({
+            ruleId: i.ruleId,
+            ruleName: i.ruleName,
+            severity: i.severity.toLowerCase(),
+            file: i.file,
+            line: i.line,
+            message: i.message,
+            suggestion: i.suggestion,
+          }));
+          console.log(`  ♻️  Reusing ${issues.length} issues from existing review (saved 1 AI call)`);
+        }
+      } catch (e: any) {
+        console.warn(`  ⚠️  Could not fetch existing issues: ${e.message}`);
+      }
+    }
+
+    // Only call AI if no cached issues found
+    if (issues.length === 0) {
+      const { builtinRules, customPrompts } = await getTeamRules(teamId);
+      const result = await analyzeWithAI(prDiff.diff, builtinRules, customPrompts);
+      issues = result.issues;
+    }
+    console.log(`  🧠 ${issues.length} issues to fix`);
 
     if (issues.length === 0) {
       console.log("  ✅ No issues to fix!");
