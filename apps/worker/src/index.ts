@@ -260,7 +260,11 @@ async function sendSlackResult(
   // ── Build issue lines ──
   const issueLines = result.issues.slice(0, 6).map((i: any) => {
     const color = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟠" : "🔵";
-    return `${color}  *${i.ruleName}* — ${i.message}`;
+    let line = `${color}  *${i.ruleName}* — ${i.message}`;
+    if (i.suggestion) {
+      line += `\n      💡 _${i.suggestion}_`;
+    }
+    return line;
   }).join("\n\n");
 
   const moreText = result.issues.length > 6

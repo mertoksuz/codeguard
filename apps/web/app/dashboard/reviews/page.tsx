@@ -34,7 +34,7 @@ export default async function ReviewsPage() {
           _count: { select: { issues: true } },
           issues: {
             orderBy: { severity: "asc" },
-            select: { id: true, ruleName: true, severity: true, message: true, file: true, line: true },
+            select: { id: true, ruleName: true, severity: true, message: true, suggestion: true, file: true, line: true },
           },
         },
       })

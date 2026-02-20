@@ -14,6 +14,7 @@ type Issue = {
   ruleName: string;
   severity: string;
   message: string;
+  suggestion?: string | null;
   file: string;
   line: number;
 };
@@ -34,20 +35,27 @@ export function ExpandableIssues({
   return (
     <div className="bg-surface-50 rounded-xl p-3 space-y-2">
       {visibleIssues.map((issue) => (
-        <div key={issue.id} className="flex items-start gap-2 text-xs">
-          <span
-            className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${
-              severityColor[issue.severity] || ""
-            }`}
-          >
-            {issue.severity}
-          </span>
-          <span className="text-surface-600">
-            <strong>{issue.ruleName}</strong> — {issue.message}
-          </span>
-          <span className="text-surface-400 ml-auto shrink-0">
-            {issue.file}:{issue.line}
-          </span>
+        <div key={issue.id} className="text-xs">
+          <div className="flex items-start gap-2">
+            <span
+              className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                severityColor[issue.severity] || ""
+              }`}
+            >
+              {issue.severity}
+            </span>
+            <span className="text-surface-600 flex-1">
+              <strong>{issue.ruleName}</strong> — {issue.message}
+            </span>
+            <span className="text-surface-400 ml-auto shrink-0">
+              {issue.file}:{issue.line}
+            </span>
+          </div>
+          {issue.suggestion && (
+            <div className="ml-7 mt-1 text-xs bg-brand-50 text-brand-700 rounded px-2 py-1">
+              💡 {issue.suggestion}
+            </div>
+          )}
         </div>
       ))}
 

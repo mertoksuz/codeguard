@@ -4,7 +4,7 @@ const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 export async function sendAnalysisResult(channel: string, threadTs: string | undefined, result: {
   prTitle: string; prUrl: string; prNumber: number; score: number;
-  issues: Array<{ severity: string; ruleName: string; message: string }>;
+  issues: Array<{ severity: string; ruleName: string; message: string; suggestion?: string }>;
 }) {
   const blocks: any[] = [
     {
@@ -23,7 +23,11 @@ export async function sendAnalysisResult(channel: string, threadTs: string | und
   if (result.issues.length > 0) {
     const issueText = result.issues.slice(0, 5).map((i) => {
       const icon = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟡" : "🔵";
-      return `${icon} *${i.ruleName}* — ${i.message}`;
+      let line = `${icon} *${i.ruleName}* — ${i.message}`;
+      if (i.suggestion) {
+        line += `\n      💡 _${i.suggestion}_`;
+      }
+      return line;
     }).join("\n");
     blocks.push({ type: "section", text: { type: "mrkdwn", text: issueText } });
   }
